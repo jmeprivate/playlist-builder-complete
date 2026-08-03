@@ -59,18 +59,23 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
             except OSError as exc:
                 raise CopyTransactionError(f"Falló la copia de {song.path}: {exc}") from exc
             staged_items.append((staged, final_target, False))
+
         for staged, target, reuse in staged_items:
             if reuse:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staged, target)
             created.append(target)
+
         playlist_path = destination / playlist_name
         write_m3u_atomic(playlist_path, songs, mapping)
         return CopyResult(playlist_path, mapping)
-    except (OSError, CopyTransactionError):
+    except BaseException:
         for path in reversed(created):
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise
     finally:
         shutil.rmtree(stage, ignore_errors=True)

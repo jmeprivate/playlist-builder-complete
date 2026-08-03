@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -18,8 +19,8 @@ def positive_decimal(value: str) -> float:
         number = float(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("debe ser un número positivo") from exc
-    if number <= 0:
-        raise argparse.ArgumentTypeError("debe ser mayor que cero")
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("debe ser un número finito mayor que cero")
     return number
 
 
@@ -122,9 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run(args)
     except KeyboardInterrupt:
-        print(
-            "\nCancelado por el usuario; no se han publicado archivos temporales.", file=sys.stderr
-        )
+        print("\nCancelado por el usuario; se han retirado los archivos parciales.", file=sys.stderr)
         return 130
     except EOFError:
         print("\nLa entrada del terminal se cerró; operación cancelada.", file=sys.stderr)
@@ -134,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             raise
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:  # último límite: evita tracebacks en el modo normal
+    except Exception as exc:
         if args.debug:
             raise
         logging.getLogger(__name__).error("Fallo inesperado: %s", exc)

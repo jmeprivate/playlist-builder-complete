@@ -18,7 +18,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
-from prompt_toolkit.shortcuts import confirm, print_formatted_text
+from prompt_toolkit.shortcuts import clear, confirm, print_formatted_text
 
 from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
 from .filters import complete_year_range, filter_songs
@@ -47,7 +47,7 @@ class SelectionState:
         self.history = [(op, item) for op, item in self.history if item != value]
         own.append(value)
         self.history.append((operation, value))
-        self.notice = f"{value} movido a la última operación." if moved else ""
+        self.notice = f"{value} se movió a la última operación." if moved else f"Añadido: {value}"
 
     def undo(self) -> None:
         if not self.history:
@@ -84,7 +84,7 @@ class SubstringCompleter(Completer):
 
     def get_completions(
         self, document: Document, complete_event: CompleteEvent
-    ) -> Iterable[Completion]:  # pragma: no cover - prompt_toolkit drives this generator
+    ) -> Iterable[Completion]:
         text = document.text_before_cursor
         query = text[1:] if text[:1] in {"+", "-"} else text
         for option in self.matches(text):
@@ -99,9 +99,33 @@ class FirstMatchSuggestion(AutoSuggest):
         text = document.text_before_cursor
         query = text[1:] if text[:1] in {"+", "-"} else text
         matches = self.completer.matches(text)
-        if matches and normalize_for_search(matches[0]).startswith(normalize_for_search(query)):
-            return Suggestion(matches[0][len(query) :])
+        if not matches:
+            return None
+        first = matches[0]
+        if normalize_for_search(first).startswith(normalize_for_search(query)):
+            return Suggestion(first[len(query) :])
         return None
+
+
+def _selection_toolbar(state: SelectionState, completer: SubstringCompleter) -> HTML:
+    if state.notice:
+        return HTML(f"<ansiyellow>{escape_html(state.notice)}</ansiyellow>")
+    text = get_app().current_buffer.text
+    if not text:
+        return HTML("<dim>+ incluir · - excluir · Enter continuar · Esc volver · Backspace deshacer</dim>")
+    if text[:1] not in {"+", "-"}:
+        return HTML("<ansired>Empieza con + para incluir o - para excluir.</ansired>")
+    if len(text) == 1:
+        action = "incluir" if text == "+" else "excluir"
+        return HTML(f"<dim>Escribe para {action}; Tab recorre las coincidencias.</dim>")
+    matches = completer.matches(text)
+    if not matches:
+        return HTML("<ansired>No hay coincidencias. Corrige el texto o pulsa Esc.</ansired>")
+    first = escape_html(matches[0])
+    return HTML(
+        f"<ansicyan>{len(matches)} coincidencia(s)</ansicyan> · "
+        f"<b>{first}</b> · <dim>Tab/Shift+Tab para recorrer, Enter para aceptar</dim>"
+    )
 
 
 def _selection_bindings(state: SelectionState, completer: SubstringCompleter) -> KeyBindings:
@@ -119,6 +143,10 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
             get_app().invalidate()
             return
         query = text[1:].strip()
+        if not query:
+            state.notice = "Escribe un nombre antes de confirmar."
+            get_app().invalidate()
+            return
         matches = completer.matches(text)
         exact = next(
             (
@@ -139,8 +167,9 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
     def escape(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
         if buffer.text:
-            buffer.text = ""
+            buffer.reset()
             state.notice = "Búsqueda parcial cancelada."
+            get_app().invalidate()
         else:
             get_app().exit(result=BACK)
 
@@ -149,6 +178,7 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
         buffer = event.current_buffer
         if buffer.text:
             buffer.delete_before_cursor(count=1)
+            state.notice = ""
         else:
             state.undo()
             get_app().invalidate()
@@ -156,19 +186,26 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
     return bindings
 
 
+def _show_header(title: str, subtitle: str = "") -> None:
+    print_formatted_text(HTML(f"<b><ansicyan>{escape_html(title)}</ansicyan></b>"))
+    if subtitle:
+        print_formatted_text(HTML(f"<dim>{escape_html(subtitle)}</dim>"))
+    print("─" * 72)
+
+
 def _show_selections(label: str, state: SelectionState) -> None:
-    print_formatted_text(HTML(f"<b>{escape_html(label)}</b>"))
-    included = escape_html(", ".join(state.included) or "—")
-    excluded = escape_html(", ".join(state.excluded) or "—")
-    print_formatted_text(HTML(f"  <ansigreen>Incluidos: {included}</ansigreen>"))
-    print_formatted_text(HTML(f"  <ansired>Excluidos: {excluded}</ansired>"))
-    if state.notice:
-        print_formatted_text(HTML(f"  <ansiyellow>{escape_html(state.notice)}</ansiyellow>"))
+    _show_header(label, "Construye listas de inclusión y exclusión")
+    included = escape_html(", ".join(state.included) or "ninguno")
+    excluded = escape_html(", ".join(state.excluded) or "ninguno")
+    print_formatted_text(HTML(f"<ansigreen>  + Incluidos: {included}</ansigreen>"))
+    print_formatted_text(HTML(f"<ansired>  - Excluidos: {excluded}</ansired>"))
+    print()
 
 
 def select_values(label: str, options: list[str], state: SelectionState) -> str:
     completer = SubstringCompleter(options)
     while True:
+        clear()
         _show_selections(label, state)
         session: PromptSession[str] = PromptSession(
             completer=completer,
@@ -177,10 +214,8 @@ def select_values(label: str, options: list[str], state: SelectionState) -> str:
             key_bindings=_selection_bindings(state, completer),
         )
         result = session.prompt(
-            "+ incluir / - excluir (Enter vacío: continuar): ",
-            bottom_toolbar=(
-                "Tab/Shift+Tab: coincidencias · Esc: cancelar/volver · Backspace vacío: deshacer"
-            ),
+            "+/- búsqueda: ",
+            bottom_toolbar=lambda: _selection_toolbar(state, completer),
         )
         state.notice = ""
         if result in {"", BACK}:
@@ -195,11 +230,15 @@ def _simple_prompt(message: str, default: str = "") -> str:
     def escape(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
         if buffer.text:
-            buffer.text = ""
+            buffer.reset()
         else:
             get_app().exit(result=BACK)
 
-    return PromptSession[str](key_bindings=bindings).prompt(message, default=default)
+    return PromptSession[str](key_bindings=bindings).prompt(
+        message,
+        default=default,
+        bottom_toolbar="Esc borra la entrada; Esc de nuevo vuelve a la pantalla anterior",
+    )
 
 
 def sanitize_playlist_name(value: str, platform: str | None = None) -> str:
@@ -294,15 +333,12 @@ def run_interactive(
     available_min = min(years) if years else None
     available_max = max(years) if years else None
     year_text = f"{available_min}-{available_max}" if years else "sin años válidos"
-    print_formatted_text(HTML("<b>¡Creemos una playlist!</b>"))
-    print(
-        f"\nEncontrados:\n- {len(artists)} artistas\n- {len(genres)} géneros\n"
-        f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
-    )
-    print(
-        "Usa + para incluir, - para excluir, Tab para coincidencias, "
-        "Enter para aceptar y Esc para volver.\n"
-    )
+    clear()
+    _show_header("¡Creemos una playlist!", "Selección interactiva de tu discoteca")
+    print(f"Artistas: {len(artists)} · Géneros: {len(genres)} · Canciones: {len(songs)}")
+    print(f"Años disponibles: {year_text}\n")
+    print("Pulsa Enter para comenzar.")
+    _simple_prompt("")
 
     state = UIState()
     screen = 0
@@ -318,6 +354,8 @@ def run_interactive(
             result = select_values("Géneros", genres, state.genres)
             screen = 0 if result == BACK else 2
         elif screen == 2:
+            clear()
+            _show_header("Intervalo temporal", "Deja el campo vacío para no fijar este extremo")
             result = _simple_prompt(
                 f"Desde el año (mín. {available_min or '—'}): ",
                 str(state.year_min_input or ""),
@@ -330,8 +368,10 @@ def run_interactive(
                 _validate_year(state.year_min_input, available_min, available_max, "el año mínimo")
                 screen = 3
             except ValueError as exc:
-                print(f"Valor no válido: {exc}")
+                print_formatted_text(HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>"))
         elif screen == 3:
+            clear()
+            _show_header("Intervalo temporal", "El intervalo incluye ambos extremos")
             result = _simple_prompt(
                 f"Hasta el año (máx. {available_max or '—'}): ",
                 str(state.year_max_input or ""),
@@ -350,8 +390,10 @@ def run_interactive(
                 )
                 screen = 4
             except ValueError as exc:
-                print(f"Valor no válido: {exc}")
+                print_formatted_text(HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>"))
         elif screen == 4:
+            clear()
+            _show_header("Nombre de la playlist")
             result = _simple_prompt("¿Qué nombre le damos a la playlist? ", state.playlist_name)
             if result == BACK:
                 screen = 3
@@ -363,12 +405,13 @@ def run_interactive(
                     print(f"Ya existía; se usará: {state.playlist_name}")
                 screen = 5
             except ValueError as exc:
-                print(f"Nombre no válido: {exc}")
+                print_formatted_text(HTML(f"<ansired>Nombre no válido: {escape_html(str(exc))}</ansired>"))
         else:
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
             selected = select_balanced(candidates, max_size_bytes, max_per_album, seed)
-            print("\nResumen")
+            clear()
+            _show_header("Resumen final", state.playlist_name)
             print(f"Artistas incluidos: {', '.join(state.artists.included) or 'cualquiera'}")
             print(f"Artistas excluidos: {', '.join(state.artists.excluded) or 'ninguno'}")
             print(f"Géneros incluidos: {', '.join(state.genres.included) or 'cualquiera'}")
@@ -382,22 +425,16 @@ def run_interactive(
             print(f"Destino: {destination}")
             candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
             selected_size = _format_mb(sum(song.size_bytes for song in selected))
-            print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
-            print(f"Canciones que entrarán: {len(selected)} ({selected_size})")
+            print(f"\nCandidatas: {len(candidates)} ({candidate_size})")
+            print(f"Seleccionadas: {len(selected)} ({selected_size})")
             if not selected:
-                choice = (
-                    _simple_prompt("No hay canciones seleccionables. [v]olver / [c]ancelar: ")
-                    .strip()
-                    .casefold()
-                )
+                choice = _simple_prompt("\nNo hay canciones seleccionables. [v]olver / [c]ancelar: ").strip().casefold()
                 if choice == "v" or choice == BACK:
                     screen = 4
                 elif choice == "c":
                     return None
                 continue
-            choice = (
-                _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ").strip().casefold()
-            )
+            choice = _simple_prompt("\n[s] confirmar / [v] volver / [c] cancelar: ").strip().casefold()
             if choice == "s":
                 return state.playlist_name, selected
             if choice == "v" or choice == BACK:

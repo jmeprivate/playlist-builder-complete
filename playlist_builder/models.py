@@ -62,6 +62,7 @@ class AuditIssue:
     relative_path: Path
     missing_tags: tuple[str, ...] = ()
     error: str | None = None
+    is_directory: bool = False
 
 
 @dataclass(slots=True)
@@ -71,7 +72,9 @@ class AuditReport:
 
     @property
     def unreadable_count(self) -> int:
-        return sum(issue.error is not None for issue in self.issues)
+        return sum(
+            issue.error is not None and not issue.is_directory for issue in self.issues
+        )
 
     def missing_count(self, tag: str) -> int:
         return sum(tag in issue.missing_tags for issue in self.issues)

@@ -43,7 +43,9 @@ def _discover_audio_files(
 
     def record_walk_error(exc: OSError) -> None:
         problem = Path(exc.filename) if exc.filename else root
-        report.issues.append(AuditIssue(_error_path(problem, root), error=f"OSError: {exc}"))
+        report.issues.append(
+            AuditIssue(_error_path(problem, root), error=f"OSError: {exc}", is_directory=True)
+        )
         LOGGER.warning("No se pudo recorrer %s: %s", problem, exc)
 
     for directory, dirnames, filenames in os.walk(root, topdown=True, onerror=record_walk_error):
@@ -51,7 +53,9 @@ def _discover_audio_files(
         try:
             current_relative = current.relative_to(root)
         except ValueError as exc:
-            report.issues.append(AuditIssue(Path(current.name), error=f"ValueError: {exc}"))
+            report.issues.append(
+                AuditIssue(Path(current.name), error=f"ValueError: {exc}", is_directory=True)
+            )
             dirnames[:] = []
             continue
 
@@ -63,7 +67,9 @@ def _discover_audio_files(
                 resolved = child.resolve()
             except (OSError, RuntimeError) as exc:
                 report.issues.append(
-                    AuditIssue(relative, error=f"{type(exc).__name__}: {exc}")
+                    AuditIssue(
+                        relative, error=f"{type(exc).__name__}: {exc}", is_directory=True
+                    )
                 )
                 LOGGER.warning("No se pudo resolver %s: %s", child, exc)
                 continue

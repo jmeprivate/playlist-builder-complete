@@ -47,7 +47,9 @@ class SelectionState:
         self.history = [(op, item) for op, item in self.history if item != value]
         own.append(value)
         self.history.append((operation, value))
-        self.notice = f"{value} se movió a la última operación." if moved else f"Añadido: {value}"
+        self.notice = (
+            f"{value} se movió a la última operación." if moved else f"Añadido: {value}"
+        )
 
     def undo(self) -> None:
         if not self.history:
@@ -112,7 +114,10 @@ def _selection_toolbar(state: SelectionState, completer: SubstringCompleter) -> 
         return HTML(f"<ansiyellow>{escape_html(state.notice)}</ansiyellow>")
     text = get_app().current_buffer.text
     if not text:
-        return HTML("<dim>+ incluir · - excluir · Enter continuar · Esc volver · Backspace deshacer</dim>")
+        return HTML(
+            "<dim>+ incluir · - excluir · Enter continuar · "
+            "Esc volver · Backspace deshacer</dim>"
+        )
     if text[:1] not in {"+", "-"}:
         return HTML("<ansired>Empieza con + para incluir o - para excluir.</ansired>")
     if len(text) == 1:
@@ -355,7 +360,9 @@ def run_interactive(
             screen = 0 if result == BACK else 2
         elif screen == 2:
             clear()
-            _show_header("Intervalo temporal", "Deja el campo vacío para no fijar este extremo")
+            _show_header(
+                "Intervalo temporal", "Deja el campo vacío para no fijar este extremo"
+            )
             result = _simple_prompt(
                 f"Desde el año (mín. {available_min or '—'}): ",
                 str(state.year_min_input or ""),
@@ -365,10 +372,14 @@ def run_interactive(
                 continue
             try:
                 state.year_min_input = int(result) if result.strip() else None
-                _validate_year(state.year_min_input, available_min, available_max, "el año mínimo")
+                _validate_year(
+                    state.year_min_input, available_min, available_max, "el año mínimo"
+                )
                 screen = 3
             except ValueError as exc:
-                print_formatted_text(HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>"))
+                print_formatted_text(
+                    HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>")
+                )
         elif screen == 3:
             clear()
             _show_header("Intervalo temporal", "El intervalo incluye ambos extremos")
@@ -381,7 +392,9 @@ def run_interactive(
                 continue
             try:
                 state.year_max_input = int(result) if result.strip() else None
-                _validate_year(state.year_max_input, available_min, available_max, "el año máximo")
+                _validate_year(
+                    state.year_max_input, available_min, available_max, "el año máximo"
+                )
                 state.year_min, state.year_max = complete_year_range(
                     state.year_min_input,
                     state.year_max_input,
@@ -390,7 +403,9 @@ def run_interactive(
                 )
                 screen = 4
             except ValueError as exc:
-                print_formatted_text(HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>"))
+                print_formatted_text(
+                    HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>")
+                )
         elif screen == 4:
             clear()
             _show_header("Nombre de la playlist")
@@ -405,7 +420,9 @@ def run_interactive(
                     print(f"Ya existía; se usará: {state.playlist_name}")
                 screen = 5
             except ValueError as exc:
-                print_formatted_text(HTML(f"<ansired>Nombre no válido: {escape_html(str(exc))}</ansired>"))
+                print_formatted_text(
+                    HTML(f"<ansired>Nombre no válido: {escape_html(str(exc))}</ansired>")
+                )
         else:
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
@@ -428,13 +445,23 @@ def run_interactive(
             print(f"\nCandidatas: {len(candidates)} ({candidate_size})")
             print(f"Seleccionadas: {len(selected)} ({selected_size})")
             if not selected:
-                choice = _simple_prompt("\nNo hay canciones seleccionables. [v]olver / [c]ancelar: ").strip().casefold()
+                choice = (
+                    _simple_prompt(
+                        "\nNo hay canciones seleccionables. [v]olver / [c]ancelar: "
+                    )
+                    .strip()
+                    .casefold()
+                )
                 if choice == "v" or choice == BACK:
                     screen = 4
                 elif choice == "c":
                     return None
                 continue
-            choice = _simple_prompt("\n[s] confirmar / [v] volver / [c] cancelar: ").strip().casefold()
+            choice = (
+                _simple_prompt("\n[s] confirmar / [v] volver / [c] cancelar: ")
+                .strip()
+                .casefold()
+            )
             if choice == "s":
                 return state.playlist_name, selected
             if choice == "v" or choice == BACK:

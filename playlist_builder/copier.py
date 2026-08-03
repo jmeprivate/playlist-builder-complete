@@ -76,6 +76,14 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+        for path in reversed(created):
+            parent = path.parent
+            while parent != destination and destination in parent.parents:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
         raise
     finally:
         shutil.rmtree(stage, ignore_errors=True)

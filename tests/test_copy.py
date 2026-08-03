@@ -66,5 +66,5 @@ def test_keyboard_interrupt_rolls_back_published_tracks(
     with pytest.raises(KeyboardInterrupt):
         copy_and_write_playlist(destination, "Interrupted.m3u", songs)
     assert not (destination / "Interrupted.m3u").exists()
-    assert not list((destination / "Music").rglob("*.mp3"))
+    assert not list((destination / "Music").rglob("*"))
     assert not list(destination.glob(".playlist-copy-*"))

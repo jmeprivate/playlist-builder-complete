@@ -123,7 +123,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run(args)
     except KeyboardInterrupt:
-        print("\nCancelado por el usuario; se han retirado los archivos parciales.", file=sys.stderr)
+        print(
+            "\nCancelado por el usuario; se han retirado los archivos parciales.",
+            file=sys.stderr,
+        )
         return 130
     except EOFError:
         print("\nLa entrada del terminal se cerró; operación cancelada.", file=sys.stderr)

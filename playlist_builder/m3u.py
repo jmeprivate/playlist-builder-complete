@@ -10,7 +10,9 @@ from .models import Song
 
 
 def _safe_extinf_text(value: str) -> str:
-    cleaned = "".join(" " if unicodedata.category(char).startswith("C") else char for char in value)
+    cleaned = "".join(
+        " " if unicodedata.category(char) in {"Cc", "Zl", "Zp"} else char for char in value
+    )
     return " ".join(cleaned.split())
 
 

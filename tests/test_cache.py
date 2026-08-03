@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -8,7 +9,7 @@ from playlist_builder.models import Song
 from playlist_builder.scanner import scan_library
 
 
-def test_cache_valid_stale_removed_and_corrupt(
+def test_cache_valid_stale_removed_corrupt_and_modified(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:
     root = tmp_path / "library"
@@ -35,29 +36,40 @@ def test_cache_valid_stale_removed_and_corrupt(
     assert len(songs) == 1 and len(calls) == 1
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 1
-    audio.write_bytes(b"changed-size")
+
+    cache_path = root / CACHE_FILENAME
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    cache["files"]["Artist/Album/one.mp3"]["size"] += 1
+    cache_path.write_text(json.dumps(cache), encoding="utf-8")
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 2
-    audio.unlink()
-    scan_library(root, metadata_reader=reader)
-    assert "one.mp3" not in (root / CACHE_FILENAME).read_text(encoding="utf-8")
-    (root / CACHE_FILENAME).write_text("{broken", encoding="utf-8")
-    audio.write_bytes(b"new")
+
+    audio.write_bytes(b"changed-size")
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 3
+    audio.unlink()
+    scan_library(root, metadata_reader=reader)
+    assert "one.mp3" not in cache_path.read_text(encoding="utf-8")
+    cache_path.write_text("{broken", encoding="utf-8")
+    audio.write_bytes(b"new")
+    scan_library(root, metadata_reader=reader)
+    assert len(calls) == 4
 
 
-def test_scan_excludes_copy_tree_and_continues_after_mutagen_error(tmp_path: Path) -> None:
+def test_scan_excludes_copy_tree_and_continues_after_reader_errors(tmp_path: Path) -> None:
     root = tmp_path / "library"
     original = root / "Artist" / "Album" / "original.mp3"
+    second = root / "Artist" / "Album" / "second.mp3"
     copied = root / "Export" / "Music" / "Artist" / "Album" / "copy.mp3"
     stale = root / "Export" / ".playlist-copy-old" / "stale.mp3"
-    for path in (original, copied, stale):
+    for path in (original, second, copied, stale):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"audio")
 
     def broken_reader(path: Path, music_root: Path) -> Song:
-        raise MutagenError("cabecera corrupta")
+        if path.name == "original.mp3":
+            raise MutagenError("cabecera corrupta")
+        raise RuntimeError("error inesperado aislado")
 
     songs, report = scan_library(
         root,
@@ -65,6 +77,9 @@ def test_scan_excludes_copy_tree_and_continues_after_mutagen_error(tmp_path: Pat
         metadata_reader=broken_reader,
     )
     assert songs == []
-    assert report.total_audio_files == 1
-    assert report.unreadable_count == 1
-    assert report.issues[0].relative_path == original.relative_to(root)
+    assert report.total_audio_files == 2
+    assert report.unreadable_count == 2
+    assert {issue.relative_path for issue in report.issues} == {
+        original.relative_to(root),
+        second.relative_to(root),
+    }

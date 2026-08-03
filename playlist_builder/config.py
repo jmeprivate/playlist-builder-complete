@@ -17,10 +17,6 @@ AUDIO_EXTENSIONS = frozenset(
         ".mp4",
         ".ogg",
         ".opus",
-        ".wav",
-        ".wma",
         ".ape",
-        ".aiff",
-        ".aif",
     }
 )

@@ -45,3 +45,26 @@ def test_partial_copy_failure_publishes_nothing(
     assert (
         not list((destination / "Music").rglob("*")) if (destination / "Music").exists() else True
     )
+
+
+def test_keyboard_interrupt_rolls_back_published_tracks(
+    tmp_path: Path, song_factory: Callable[..., Song], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    songs = [song_factory(), song_factory()]
+    real_replace = copier.os.replace
+    calls = 0
+
+    def interrupting_replace(source: Path, target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        real_replace(source, target)
+
+    monkeypatch.setattr(copier.os, "replace", interrupting_replace)
+    destination = tmp_path / "export"
+    with pytest.raises(KeyboardInterrupt):
+        copy_and_write_playlist(destination, "Interrupted.m3u", songs)
+    assert not (destination / "Interrupted.m3u").exists()
+    assert not list((destination / "Music").rglob("*.mp3"))
+    assert not list(destination.glob(".playlist-copy-*"))

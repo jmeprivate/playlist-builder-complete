@@ -17,11 +17,23 @@ def test_m3u_relative_paths_unicode_spaces_and_extinf(
     assert "\\" not in content
 
 
-def test_m3u_copy_override_is_relative(tmp_path: Path, song_factory: Callable[..., Song]) -> None:
+def test_m3u_copy_override_points_to_copied_location(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
     song = song_factory()
     copied = tmp_path / "export" / "Music" / song.relative_path
     content = render_m3u([song], tmp_path / "export", {song.path: copied})
     assert f"Music/{song.relative_path.as_posix()}" in content
+    assert str(song.path) not in content
+
+
+def test_extinf_metadata_controls_are_flattened(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
+    song = song_factory(artist=("Artist\nInjected",), title="Title\r\nSecond line")
+    content = render_m3u([song], tmp_path)
+    assert "#EXTINF:123,Artist Injected - Title Second line\n" in content
+    assert len(content.splitlines()) == 3
 
 
 def test_atomic_writer_uses_utf8_lf(tmp_path: Path, song_factory: Callable[..., Song]) -> None:

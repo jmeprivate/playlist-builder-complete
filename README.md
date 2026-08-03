@@ -1,73 +1,67 @@
 # Playlist Builder
 
 Utilidad interactiva para escanear una discoteca organizada por carpetas, filtrar por artista,
-género y año, y generar una playlist M3U equilibrada. Funciona con Python 3.12 o posterior en
-macOS, Windows 11 y Linux.
+género y año, y generar una playlist M3U equilibrada. Requiere Python 3.12 o posterior y está
+diseñada para Windows 11, Linux y macOS.
 
-## Decisiones y compatibilidad
+## Formatos y compatibilidad
 
-- `mutagen` lee los metadatos sin programas externos. Algunos contenedores o variantes poco
-  habituales pueden no exponer todas las etiquetas; se registran como ausentes y el escaneo sigue.
-- `prompt_toolkit` gestiona teclas especiales, autocompletado, colores y terminales multiplataforma.
-- La identidad de un álbum es la carpeta relativa que lo contiene, no el texto de la etiqueta.
-- `Artist` representa al artista de la pista. `AlbumArtist` no se mezcla con él (algo esencial en
-  recopilatorios cuyo artista de álbum es `Various Artists`). Para ASF/WMA, `Author` se usa solo como
-  fallback cuando no existe `Artist`.
-- Los valores múltiples de `Genre` separados por comas, punto y coma o valores nativos independientes
-  se convierten en géneros separados; por ejemplo, `Jazz, Contemporary Jazz` permite buscar cualquiera.
-- La caché `.playlist_catalog.json` se guarda en la raíz musical, usa rutas relativas y compara
-  ruta, tamaño y `mtime_ns`. Su reemplazo es atómico y una caché corrupta se ignora.
-- Los M3U usan UTF-8, separadores `/` y saltos de línea LF. Es una combinación entendida por los
-  reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos.
+Los formatos soportados son:
 
-No existe una incompatibilidad técnica general con los formatos pedidos, aunque la disponibilidad
-real de etiquetas depende de que cada archivo las contenga y de que `mutagen` reconozca esa variante.
+- MP3
+- FLAC
+- M4A y MP4
+- OGG Vorbis
+- Opus
+- APE
+
+WAV, WMA, AIFF y AIF no están soportados. Se omiten durante el escaneo y no aparecen como errores
+de auditoría. Esta limitación es intencionada: sus modelos de metadatos varían entre contenedores y
+aplicaciones y no se garantiza una lectura coherente de `Artist`, `Genre` y `Year`.
+
+`mutagen` lee los metadatos sin herramientas externas. Un archivo individual corrupto, inaccesible
+o con metadatos inesperados se registra y se omite sin cancelar el resto del escaneo.
+
+Los archivos M3U se generan como Extended M3U en UTF-8, con saltos LF y separadores `/`. Las etiquetas
+de texto se limpian de controles que podrían romper la estructura. Sin `--copy`, las rutas son
+relativas a la discoteca original. Con `--copy`, todas las entradas apuntan a las nuevas copias bajo
+`Music/<ruta relativa original>`; la playlist no conserva rutas a los originales.
 
 ## Instalación
 
-### macOS o Linux
-
-```bash
-cd playlist_builder
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-### Windows 11 (PowerShell)
+### Windows 11, PowerShell
 
 ```powershell
-cd playlist_builder
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-## Configurar la discoteca
+### Linux o macOS
 
-Abra `playlist_builder/config.py` y cambie únicamente esta constante por la ruta real:
-
-```python
-MUSIC_ROOT = Path(r"/Users/usuario/Música/MiDiscoteca")
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-En Windows, por ejemplo:
+## Configuración
+
+Edite `playlist_builder/config.py` y establezca la raíz de la discoteca:
 
 ```python
 MUSIC_ROOT = Path(r"D:\MiDiscoteca")
 ```
 
-El margen usado cuando solo se indica uno de los años también se configura allí:
+El margen usado cuando solo se introduce uno de los años se configura con:
 
 ```python
 DEFAULT_YEAR_MARGIN = 5
 ```
 
-## Ejecución
-
-Desde la raíz del proyecto:
+## Uso
 
 ```bash
 python crear_playlist.py
@@ -79,77 +73,70 @@ python crear_playlist.py --copy "D:\Musica para el coche"
 python crear_playlist.py --size 8000 --seed 12345
 ```
 
-Después de instalar el proyecto en el entorno virtual, también puede usarse:
+Tras instalar el proyecto también puede ejecutarse:
 
 ```bash
 crear-playlist --size 4000
 ```
 
-En Windows está disponible `crear-playlist.cmd`; en macOS/Linux puede hacerse ejecutable el launcher
-opcional con `chmod +x crear-playlist.sh`.
+Parámetros principales:
 
-### Parámetros
-
-- `--size N`: máximo en MB decimales (`1 MB = 1_000_000 bytes`); acepta decimales y vale 8000 por
-  defecto. El resultado nunca supera el límite.
-- `--max-album N`: máximo de canciones por carpeta de álbum; vale 2 por defecto.
-- `--copy RUTA`: copia las canciones a `RUTA/Music/<ruta original>` y crea allí el M3U.
-- `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
-- `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
-- `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
-- `--rescan`: descarta la caché y relee todos los metadatos.
-- `--verbose`: informa sobre caché, lectura y operaciones.
-- `--debug`: añade detalles de depuración y deja visibles los tracebacks inesperados.
+- `--size N`: límite en MB decimales. Vale 8000 por defecto y solo acepta números finitos positivos.
+- `--max-album N`: máximo de canciones de una misma carpeta de álbum. Vale 2 por defecto.
+- `--copy RUTA`: crea una copia autocontenida y una playlist que apunta exclusivamente a ella.
+- `--audit simple|full`: muestra el resumen o el detalle de tags ausentes y errores.
+- `--audit-only`: audita y termina sin abrir la interfaz.
+- `--seed N`: permite repetir la misma selección si catálogo y filtros no han cambiado.
+- `--rescan`: descarta la caché y vuelve a leer todos los metadatos.
+- `--verbose` y `--debug`: aumentan el detalle de diagnóstico.
 
 ## Interfaz
 
+La interfaz conserva el estado al volver entre pantallas y muestra siempre las acciones disponibles.
+
 En artistas y géneros:
 
-- `+` seguido de texto incluye una opción; `-` la excluye.
-- La búsqueda encuentra texto en cualquier posición e ignora mayúsculas, acentos, Unicode
-  equivalente y espacios repetidos.
-- `Tab` y `Shift+Tab` recorren coincidencias. `Enter` acepta la coincidencia exacta o la primera
-  sugerida. No admite nombres que no existan en el catálogo.
-- `Enter` sobre una línea vacía avanza.
-- `Esc` borra la búsqueda parcial; estando vacío, vuelve a la pantalla anterior.
-- `Backspace` borra texto y, estando completamente vacío, deshace la última selección confirmada.
-- Las inclusiones se muestran en verde y las exclusiones en rojo. Si una opción pasa de un conjunto
-  al otro, prevalece la última operación.
+- `+` inicia una inclusión y `-` una exclusión.
+- La búsqueda ignora mayúsculas, acentos, equivalencias Unicode y espacios repetidos.
+- Puede buscar por cualquier fragmento del nombre.
+- La barra inferior muestra la primera coincidencia y el número total de resultados.
+- `Tab` y `Shift+Tab` recorren las coincidencias.
+- `Enter` confirma la coincidencia actual; vacío pasa a la siguiente pantalla.
+- `Esc` borra la búsqueda parcial y, estando vacío, vuelve a la pantalla anterior.
+- `Backspace` borra texto y, estando vacío, deshace la última selección.
+- Las inclusiones aparecen en verde y las exclusiones en rojo.
+- Las entradas inválidas muestran feedback inmediato sin abandonar el campo.
 
-Las inclusiones de una misma categoría usan OR: una canción puede coincidir con cualquiera. Artista,
-género y año se combinan con AND. Cualquier exclusión coincidente gana siempre. Una canción sin tag
-puede participar si no hay inclusión positiva para ese tag; sin año queda fuera solo cuando existe
-un filtro temporal.
-
-Los años son opcionales e inclusivos. Si se rellena solo un extremo, el otro se calcula con
-`DEFAULT_YEAR_MARGIN` y se limita al rango disponible.
-
-Si el nombre del M3U ya existe, la aplicación propone automáticamente `Nombre (2).m3u`, sin
-sobrescribirlo. Antes de escribir muestra filtros, candidatas, tamaños y selección prevista, y deja
-confirmar, volver o cancelar.
+Las inclusiones de una categoría se combinan con OR. Artista, género y año se combinan con AND. Las
+exclusiones siempre prevalecen. Una canción sin tag puede participar cuando no exista una inclusión
+positiva para ese tag; una canción sin año queda fuera si se aplica un filtro temporal.
 
 ## Selección equilibrada
 
-Las candidatas se agrupan por carpeta de álbum. Las canciones y álbumes se barajan y la selección
-avanza por rondas, como máximo una canción por álbum y ronda. Se respeta `--max-album`; si una pista
-no cabe se siguen probando pistas más pequeñas. Esto evita depender del orden del sistema de archivos
-y no favorece sistemáticamente los primeros artistas.
+Las canciones candidatas se agrupan por carpeta de álbum. El programa baraja álbumes y canciones y
+selecciona por rondas, como máximo una pista por álbum en cada ronda, hasta agotar candidatas o el
+límite de tamaño. Nunca supera `--max-album` ni `--size`, y continúa probando canciones pequeñas si
+una canción grande no cabe.
 
-## Copia segura
+## Caché
 
-Con `--copy`, primero se copian todas las pistas a una zona temporal mediante `shutil.copy2`. Solo
-después se publican en `Music/`, y el M3U se publica el último. Ante un fallo se retiran exclusivamente
-los archivos creados por esa operación; nunca se borran archivos preexistentes. Una copia idéntica
-se reutiliza y una colisión con contenido distinto recibe un sufijo incremental.
+La caché `.playlist_catalog.json` utiliza rutas relativas, tamaño y `mtime_ns`. Incluye un SHA-256 del
+contenido canónico. Si el archivo se modifica manualmente o queda dañado, se descarta entero y se
+reconstruye. La caché es una optimización: un fallo al leerla o escribirla no debe impedir crear la
+playlist.
 
-Si el destino se encuentra dentro de la discoteca, se excluye por completo del escaneo de esa
-ejecución. Los archivos originales nunca se modifican.
+## Copia y cancelación seguras
+
+Con `--copy`, las canciones se preparan primero en un directorio temporal y se publican después bajo
+`Music/`. El M3U se escribe al final. Un error o `Ctrl+C` retira las canciones publicadas por esa
+ejecución y elimina sus temporales. Los archivos preexistentes no se borran. Las copias idénticas se
+reutilizan y las colisiones con contenido distinto reciben un sufijo incremental.
 
 ## Auditoría
 
-La auditoría se recopila durante el escaneo normal. `simple` cuenta archivos, tags ausentes y errores.
-`full` añade cada ruta, sus tags ausentes y el error concreto. Un archivo corrupto, borrado durante el
-escaneo o con metadatos no legibles no detiene el resto.
+`simple` muestra totales de archivos, tags ausentes y errores. `full` añade la ruta y el error concreto.
+Los fallos se aíslan por archivo o directorio: siempre que el sistema operativo permita continuar el
+recorrido, un problema no invalida el trabajo ya realizado sobre el resto de la colección.
 
 ## Pruebas y calidad
 
@@ -160,34 +147,6 @@ ruff format --check .
 mypy playlist_builder
 ```
 
-Los tests usan directorios temporales y lectores simulados: no acceden a la colección real. Cubren
-normalización, años, filtros, tags ausentes, selección por rondas, límites, semillas, M3U, caché,
-auditoría, colisiones y fallos de copia. Incluyen además regresiones obtenidas de ejemplos MP3 y FLAC
-reales con `Artist`/`AlbumArtist`, géneros separados por comas y nombres Unicode descompuestos.
-
-## Solución de problemas
-
-- **La terminal muestra mal colores o teclas:** use Windows Terminal, iTerm2 o una terminal moderna;
-  evite ejecutar dentro de una consola sin soporte interactivo. `Ctrl+C` cancela limpiamente.
-- **Faltan tags:** ejecute `--audit full --audit-only` y corrija los archivos con un editor de tags.
-- **Un formato figura como ilegible:** compruebe que el archivo se reproduce y pruebe `--rescan`.
-  Mutagen puede reconocer el contenedor pero no una variante o etiqueta propietaria concreta.
-- **Cambió música pero sigue la información anterior:** `--rescan` reconstruye la caché. La detección
-  normal ya invalida entradas si cambia tamaño o fecha de modificación.
-- **No puede escribir el M3U o copiar:** compruebe permisos sobre `MUSIC_ROOT` o el destino. La
-  aplicación muestra la ruta problemática y no publica un M3U incompleto.
-- **La reproducción desde otra máquina no encuentra archivos:** una playlist sin `--copy` contiene
-  rutas relativas a la discoteca original. Use `--copy` para crear un árbol autocontenido.
-
-## Estructura
-
-```text
-playlist_builder/
-├── crear_playlist.py
-├── pyproject.toml
-├── playlist_builder/
-│   ├── audit.py, cache.py, cli.py, config.py, copier.py
-│   ├── filters.py, m3u.py, metadata.py, models.py
-│   ├── normalization.py, scanner.py, selector.py, ui.py
-└── tests/
-```
+Los tests cubren normalización, años, filtros, selección equilibrada, tamaño, máximo por álbum,
+semillas, M3U, rutas de copia, limpieza de metadatos, integridad de caché, errores aislados,
+colisiones y rollback ante fallos o interrupciones.

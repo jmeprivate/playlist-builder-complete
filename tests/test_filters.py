@@ -1,0 +1,40 @@
+from collections.abc import Callable
+
+from playlist_builder.filters import song_matches
+from playlist_builder.models import FilterSpec, Song
+
+
+def test_artist_and_genre_inclusions_are_or_with_exclusions_first(
+    song_factory: Callable[..., Song],
+) -> None:
+    song = song_factory(artist=("Björk", "Guest"), genres=("Art Pop", "Electronic"))
+    assert song_matches(
+        song,
+        FilterSpec(
+            included_artists=frozenset({"bjork", "other"}),
+            included_genres=frozenset({"electronic"}),
+        ),
+    )
+    assert not song_matches(
+        song,
+        FilterSpec(included_artists=frozenset({"bjork"}), excluded_artists=frozenset({"guest"})),
+    )
+    assert not song_matches(
+        song,
+        FilterSpec(
+            included_genres=frozenset({"electronic"}), excluded_genres=frozenset({"art pop"})
+        ),
+    )
+
+
+def test_missing_tags_only_fail_positive_filters(song_factory: Callable[..., Song]) -> None:
+    song = song_factory(artist=(), genres=(), year=None)
+    assert song_matches(song, FilterSpec())
+    assert not song_matches(song, FilterSpec(included_artists=frozenset({"artist"})))
+    assert not song_matches(song, FilterSpec(included_genres=frozenset({"rock"})))
+    assert not song_matches(song, FilterSpec(year_min=1990, year_max=2000))
+
+
+def test_year_interval_is_inclusive(song_factory: Callable[..., Song]) -> None:
+    assert song_matches(song_factory(year=2000), FilterSpec(year_min=2000, year_max=2000))
+    assert not song_matches(song_factory(year=1999), FilterSpec(year_min=2000, year_max=2010))

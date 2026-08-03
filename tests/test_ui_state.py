@@ -1,8 +1,16 @@
 from pathlib import Path
 
 import pytest
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.document import Document
 
-from playlist_builder.ui import SelectionState, available_playlist_name, sanitize_playlist_name
+from playlist_builder.ui import (
+    FirstMatchSuggestion,
+    SelectionState,
+    SubstringCompleter,
+    available_playlist_name,
+    sanitize_playlist_name,
+)
 
 
 def test_selection_state_moves_and_undoes_last_real_operation() -> None:
@@ -14,6 +22,15 @@ def test_selection_state_moves_and_undoes_last_real_operation() -> None:
     assert state.excluded == ["Talk Talk", "Björk"]
     state.undo()
     assert state.excluded == ["Talk Talk"]
+
+
+def test_substring_completion_ignores_case_and_accents() -> None:
+    completer = SubstringCompleter(["Björk", "Talking Heads", "Talk Talk"])
+    assert completer.matches("+bjork") == ["Björk"]
+    assert completer.matches("-HEADS") == ["Talking Heads"]
+    suggestion = FirstMatchSuggestion(completer).get_suggestion(Buffer(), Document("+talk"))
+    assert suggestion is not None
+    assert suggestion.text == "ing Heads"
 
 
 def test_playlist_filename_sanitizing_and_increment(tmp_path: Path) -> None:

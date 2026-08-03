@@ -91,7 +91,11 @@ def write_cache(path: Path, entries: dict[str, CacheEntry]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-    except BaseException:
+    except KeyboardInterrupt:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
         raise
+    except OSError as exc:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        LOGGER.warning("No se pudo escribir la caché %s: %s", path, exc)

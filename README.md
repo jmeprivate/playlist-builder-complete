@@ -147,8 +147,9 @@ siempre. Una canción sin tag
 puede participar si no hay inclusión positiva para ese tag; sin año queda fuera solo cuando existe
 un filtro temporal.
 
-Los años son opcionales e inclusivos. Si se rellena solo un extremo, el otro se calcula con
-`DEFAULT_YEAR_MARGIN` y se limita al rango disponible.
+Los años son opcionales e inclusivos. Si se introduce un único año `Y`, se usa el intervalo
+`Y - default_year_margin` a `Y + default_year_margin`, limitado al rango disponible cuando se
+solapa con él.
 
 Después de fijar los filtros, la aplicación calcula una única selección y muestra su preview antes de
 pedir el nombre. La preview abreviada enseña las primeras y últimas cinco entradas (configurables), y

@@ -56,7 +56,8 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     max_artist = settings.default_max_artist if settings else config_module.DEFAULT_MAX_ARTIST
     source = settings.source if settings else default_config_path()
     parser = argparse.ArgumentParser(
-        description="Genera playlists M3U equilibradas desde una discoteca local."
+        description="Genera playlists M3U equilibradas desde una discoteca local.",
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--size",
@@ -246,7 +247,11 @@ def main(argv: list[str] | None = None) -> int:
             validate_name(args.profile)
         if args.save_profile:
             validate_name(args.save_profile)
-        profiles = load_profiles(settings.profiles_file)
+        profiles = (
+            load_profiles(settings.profiles_file)
+            if args.profile or args.save_profile or args.list_profiles
+            else {}
+        )
         if args.list_profiles:
             for name, profile in sorted(profiles.items()):
                 print(format_profile_summary(name, profile))

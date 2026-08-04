@@ -380,14 +380,18 @@ def _validate_year(
     available_min: int | None,
     available_max: int | None,
     label: str,
+    *,
+    allow_unavailable: bool = False,
 ) -> None:
     if year is None:
         return
     maximum_reasonable = datetime.now().year + MAX_REASONABLE_YEAR_OFFSET
     if not MIN_REASONABLE_YEAR <= year <= maximum_reasonable:
         raise ValueError(f"{label} debe estar entre {MIN_REASONABLE_YEAR} y {maximum_reasonable}")
-    # A profile is a durable preference, not a catalog snapshot.  Years with no
-    # current match remain valid (and naturally produce no candidates).
+    if not allow_unavailable and available_min is not None and year < available_min:
+        raise ValueError(f"{label} es menor que el mínimo disponible ({available_min})")
+    if not allow_unavailable and available_max is not None and year > available_max:
+        raise ValueError(f"{label} es mayor que el máximo disponible ({available_max})")
 
 
 def run_interactive(
@@ -466,6 +470,26 @@ def run_interactive(
             state.artists.notice = notice
             state.album_artists.notice = notice
             state.genres.notice = notice
+        profile_has_no_year_match = (
+            not years
+            and (initial_profile.year_min is not None or initial_profile.year_max is not None)
+        ) or (
+            available_min is not None
+            and available_max is not None
+            and (
+                (initial_profile.year_min is not None and initial_profile.year_min > available_max)
+                or (
+                    initial_profile.year_max is not None
+                    and initial_profile.year_max < available_min
+                )
+            )
+        )
+        if profile_has_no_year_match:
+            year_notice = (
+                "El perfil conserva un intervalo de años sin coincidencia actual: "
+                f"{initial_profile.year_min or '…'}-{initial_profile.year_max or '…'}"
+            )
+            state.artists.notice = " ".join(filter(None, (state.artists.notice, year_notice)))
     session_rng = random.Random() if seed is None else random.Random(seed)
     candidates: list[Song] = []
     skipped_by_artist_quota = 0
@@ -494,7 +518,16 @@ def run_interactive(
                 continue
             try:
                 state.year_min_input = int(result) if result.strip() else None
-                _validate_year(state.year_min_input, available_min, available_max, "el año mínimo")
+                _validate_year(
+                    state.year_min_input,
+                    available_min,
+                    available_max,
+                    "el año mínimo",
+                    allow_unavailable=(
+                        initial_profile is not None
+                        and state.year_min_input == initial_profile.year_min
+                    ),
+                )
                 screen = 4
             except ValueError as exc:
                 print(f"Valor no válido: {exc}")
@@ -508,7 +541,16 @@ def run_interactive(
                 continue
             try:
                 state.year_max_input = int(result) if result.strip() else None
-                _validate_year(state.year_max_input, available_min, available_max, "el año máximo")
+                _validate_year(
+                    state.year_max_input,
+                    available_min,
+                    available_max,
+                    "el año máximo",
+                    allow_unavailable=(
+                        initial_profile is not None
+                        and state.year_max_input == initial_profile.year_max
+                    ),
+                )
                 state.year_min, state.year_max = complete_year_range(
                     state.year_min_input,
                     state.year_max_input,

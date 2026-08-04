@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from playlist_builder import profiles as profiles_module
 from playlist_builder.profiles import (
     FilterProfile,
     ProfileError,
@@ -69,3 +70,20 @@ def test_replace_failure_preserves_existing_file(
     with pytest.raises(ProfileError, match="simulated"):
         save_profiles_atomic(path, {"x": FilterProfile()})
     assert path.read_text(encoding="utf-8") == "original"
+
+
+def test_atomic_save_syncs_file_and_parent_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+    real_fsync = profiles_module.os.fsync
+
+    def tracking_fsync(descriptor: int) -> None:
+        calls.append(descriptor)
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(profiles_module.os, "fsync", tracking_fsync)
+    save_profiles_atomic(tmp_path / "profiles.json", {"x": FilterProfile()})
+
+    assert len(calls) == 2

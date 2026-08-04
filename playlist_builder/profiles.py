@@ -172,6 +172,16 @@ def save_profiles_atomic(path: Path, profiles: dict[str, FilterProfile]) -> None
             os.fsync(stream.fileno())
         os.replace(temporary, path)
         temporary = None
+        # Make the rename durable on POSIX. Other platforms may reject opening
+        # a directory, in which case the atomic replacement is still retained.
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError:
+            pass
     except OSError as exc:
         raise ProfileError(f"no se pudo guardar el archivo de perfiles {path}: {exc}") from exc
     finally:

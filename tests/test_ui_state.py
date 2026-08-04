@@ -4,6 +4,7 @@ import pytest
 
 from playlist_builder.ui import (
     SelectionState,
+    UIState,
     available_playlist_name,
     format_preview,
     sanitize_playlist_name,
@@ -40,3 +41,14 @@ def test_preview_is_numbered_and_truncates_both_ends(song_factory) -> None:  # t
     assert "3. Artist - Title 2" not in preview
     full = format_preview(songs, max_size_bytes=1_000, max_per_album=2, edge_entries=2, full=True)
     assert "3. Artist - Title 2" in full
+
+
+def test_album_artist_selection_has_independent_move_and_undo_state() -> None:
+    state = UIState()
+    state.album_artists.add("+", "Various Artists")
+    state.album_artists.add("-", "Various Artists")
+    assert state.artists.included == []
+    assert state.album_artists.included == []
+    assert state.album_artists.excluded == ["Various Artists"]
+    state.album_artists.undo()
+    assert state.album_artists.excluded == []

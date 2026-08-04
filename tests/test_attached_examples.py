@@ -39,6 +39,7 @@ def test_attached_mp3_keeps_track_artist_separate_from_album_artist(
     song = metadata.read_song(path, tmp_path)
 
     assert song.artist == ("The Hoffpauir Family",)
+    assert song.album_artists == ("Various Artists",)
     assert "Various Artists" not in song.artist
     assert song.genres == ("Folk", "Blues", "Country Blues", "Cajun", "USA")
     assert song.year == 1999
@@ -69,6 +70,7 @@ def test_attached_flac_splits_genres_and_reads_all_primary_fields(
     song = metadata.read_song(path, tmp_path)
 
     assert song.artist == ("Gateway",)
+    assert song.album_artists == ("Gateway",)
     assert song.genres == ("Jazz", "Contemporary Jazz")
     assert song.year == 1995
     assert song.album == "Homecoming"

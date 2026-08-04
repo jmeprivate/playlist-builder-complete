@@ -16,6 +16,7 @@ def song_factory(tmp_path: Path) -> Callable[..., Song]:
         *,
         name: str | None = None,
         artist: tuple[str, ...] = ("Artist",),
+        album_artists: tuple[str, ...] = (),
         genres: tuple[str, ...] = ("Rock",),
         year: int | None = 2000,
         album_directory: str = "A/Artist/Album",
@@ -43,6 +44,7 @@ def song_factory(tmp_path: Path) -> Callable[..., Song]:
             size_bytes=size_bytes,
             title=title,
             duration_seconds=duration_seconds,
+            album_artists=album_artists,
         )
 
     return make_song

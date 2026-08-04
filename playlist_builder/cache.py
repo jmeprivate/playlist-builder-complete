@@ -11,7 +11,10 @@ from typing import Any
 from .models import Song
 
 LOGGER = logging.getLogger(__name__)
-CACHE_VERSION = 1
+# AlbumArtist forma parte de la identidad filtrable de una entrada. Una caché v1 no
+# lo conservaba, por lo que reutilizarla haría que la nueva pantalla pareciese vacía
+# hasta que cada archivo cambiase. Invalidarla fuerza una única relectura segura.
+CACHE_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)

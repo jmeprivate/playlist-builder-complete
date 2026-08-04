@@ -1,8 +1,8 @@
 # Playlist Builder
 
-Utilidad interactiva para escanear una discoteca organizada por carpetas, filtrar por artista,
-género y año, y generar una playlist M3U equilibrada. Funciona con Python 3.12 o posterior en
-macOS, Windows 11 y Linux.
+Utilidad interactiva para escanear una discoteca organizada por carpetas, filtrar por artista de
+pista, artista de álbum, género y año, y generar una playlist M3U equilibrada. Funciona con
+Python 3.12 o posterior en macOS, Windows 11 y Linux.
 
 ## Decisiones y compatibilidad
 
@@ -13,6 +13,9 @@ macOS, Windows 11 y Linux.
 - `Artist` representa al artista de la pista. `AlbumArtist` no se mezcla con él (algo esencial en
   recopilatorios cuyo artista de álbum es `Various Artists`). Para ASF/WMA, `Author` se usa solo como
   fallback cuando no existe `Artist`.
+- Por ejemplo, una pista de un recopilatorio con `Artist = The Hoffpauir Family` y
+  `AlbumArtist = Various Artists` aparece bajo The Hoffpauir Family en «Artistas de pista» y bajo
+  Various Artists únicamente en «Artistas de álbum». Ambos filtros se pueden combinar.
 - Los valores múltiples de `Genre` separados por comas, punto y coma o valores nativos independientes
   se convierten en géneros separados; por ejemplo, `Jazz, Contemporary Jazz` permite buscar cualquiera.
 - La caché `.playlist_catalog.json` se guarda en la raíz musical, usa rutas relativas y compara
@@ -109,7 +112,7 @@ opcional con `chmod +x crear-playlist.sh`.
 
 ## Interfaz
 
-En artistas y géneros:
+En artistas de pista, artistas de álbum y géneros:
 
 - `+` seguido de texto incluye una opción; `-` la excluye.
 - La búsqueda encuentra texto en cualquier posición e ignora mayúsculas, acentos, Unicode
@@ -122,8 +125,9 @@ En artistas y géneros:
 - Las inclusiones se muestran en verde y las exclusiones en rojo. Si una opción pasa de un conjunto
   al otro, prevalece la última operación.
 
-Las inclusiones de una misma categoría usan OR: una canción puede coincidir con cualquiera. Artista,
-género y año se combinan con AND. Cualquier exclusión coincidente gana siempre. Una canción sin tag
+Las inclusiones de una misma categoría usan OR: una canción puede coincidir con cualquiera. Artista
+de pista, artista de álbum, género y año se combinan con AND. Cualquier exclusión coincidente gana
+siempre. Una canción sin tag
 puede participar si no hay inclusión positiva para ese tag; sin año queda fuera solo cuando existe
 un filtro temporal.
 

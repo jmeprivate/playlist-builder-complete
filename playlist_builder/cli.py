@@ -9,6 +9,7 @@ from .audit import format_audit
 from .config import DEFAULT_MAX_ALBUM, DEFAULT_SIZE_MB, MUSIC_ROOT, load_user_config
 from .copier import CopyTransactionError, copy_and_write_playlist
 from .m3u import write_m3u_atomic
+from .progress import ConsoleScanProgress
 from .scanner import scan_library
 from .ui import run_interactive
 
@@ -106,7 +107,10 @@ def _run(args: argparse.Namespace) -> int:
     root = MUSIC_ROOT.expanduser().resolve()
     destination = args.copy.expanduser().resolve() if args.copy else root
     excluded = destination / "Music" if args.copy else None
-    songs, report = scan_library(root, rescan=args.rescan, excluded_root=excluded)
+    progress = None if args.audit_only else ConsoleScanProgress(sys.stderr)
+    songs, report = scan_library(
+        root, rescan=args.rescan, excluded_root=excluded, progress=progress
+    )
     if args.audit or args.audit_only:
         print(format_audit(report, args.audit or "simple"))
     if args.audit_only:

@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import unicodedata
+from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,9 +63,13 @@ def match_playlist_songs(
 
     root = music_root.expanduser().resolve()
     catalog = {_canonical_key(song.path): song.path for song in songs}
-    # Índice auxiliar insensible a mayúsculas para sistemas de archivos que
-    # preservan la escritura pero no distinguen mayúsculas (p. ej. macOS).
-    catalog_ci = {_casefold_key(song.path): song.path for song in songs}
+    # El índice auxiliar permite localizar rápidamente candidatos cuya escritura
+    # difiere solo en mayúsculas. La identidad del archivo se verifica después:
+    # en Linux dos nombres así pueden ser archivos distintos, mientras que en
+    # volúmenes insensibles a mayúsculas pueden señalar al mismo archivo.
+    catalog_ci: dict[str, list[Path]] = defaultdict(list)
+    for song in songs:
+        catalog_ci[_casefold_key(song.path)].append(song.path)
     matched: set[Path] = set()
     entries = matched_entries = missing = outside = not_scanned = unsupported = 0
     for playlist in playlists:
@@ -84,8 +89,14 @@ def match_playlist_songs(
                 outside += 1
                 continue
             song_path = catalog.get(_canonical_key(resolved))
-            if song_path is None:
-                song_path = catalog_ci.get(_casefold_key(resolved))
+            if song_path is None and resolved.is_file():
+                for possible_match in catalog_ci.get(_casefold_key(resolved), ()):
+                    try:
+                        if resolved.samefile(possible_match):
+                            song_path = possible_match
+                            break
+                    except OSError:
+                        continue
             if song_path is not None and song_path.is_file():
                 matched.add(song_path)
                 matched_entries += 1

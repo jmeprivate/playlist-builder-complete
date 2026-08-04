@@ -194,9 +194,7 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
     if args.exclude_playlist:
         # Se empareja contra el catálogo completo para que el recuento de
         # "no escaneadas" no incluya canciones ya descartadas por --from-playlist.
-        excluded_paths, playlist_report = match_playlist_songs(
-            catalog, root, args.exclude_playlist
-        )
+        excluded_paths, playlist_report = match_playlist_songs(catalog, root, args.exclude_playlist)
         logging.getLogger(__name__).info(
             "Playlists de exclusión: %d coincidencias; %d entradas ignoradas "
             "(inexistentes=%d, fuera=%d, no escaneadas=%d, no admitidas=%d)",

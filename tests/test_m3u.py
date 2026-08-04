@@ -91,6 +91,23 @@ def test_matching_normalizes_unicode_and_reports_ignored_entries(
     assert report.ignored == 5
 
 
+def test_matching_does_not_accept_wrong_case_on_case_sensitive_filesystem(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
+    song = song_factory(name="Song.mp3")
+    wrong_case = song.path.with_name("song.mp3")
+    if wrong_case.exists():
+        pytest.skip("el sistema de archivos no distingue mayúsculas")
+    playlist = tmp_path / "wrong-case.m3u"
+    playlist.write_text(f"{wrong_case}\n", encoding="utf-8")
+
+    matched, report = match_playlist_songs([song], tmp_path, [playlist])
+
+    assert matched == set()
+    assert report.matched == 0
+    assert report.missing == 1
+
+
 def test_multiple_playlists_form_a_union_and_exclusions_can_be_applied_afterward(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:

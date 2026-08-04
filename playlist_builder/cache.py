@@ -23,12 +23,14 @@ class CacheEntry:
     error: str | None
 
 
-def load_cache(path: Path, root: Path, metadata_signature: str) -> dict[str, CacheEntry]:
+def load_cache(
+    path: Path, root: Path, metadata_signature: str = ""
+) -> dict[str, CacheEntry]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         if (
             raw.get("version") != CACHE_VERSION
-            or raw.get("metadata_signature") != metadata_signature
+            or raw.get("metadata_signature", "") != metadata_signature
             or not isinstance(raw.get("files"), dict)
         ):
             raise ValueError("versión, configuración o estructura incompatible")
@@ -50,7 +52,9 @@ def load_cache(path: Path, root: Path, metadata_signature: str) -> dict[str, Cac
         return {}
 
 
-def write_cache(path: Path, entries: dict[str, CacheEntry], metadata_signature: str) -> None:
+def write_cache(
+    path: Path, entries: dict[str, CacheEntry], metadata_signature: str = ""
+) -> None:
     data: dict[str, Any] = {
         "version": CACHE_VERSION,
         "metadata_signature": metadata_signature,

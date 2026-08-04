@@ -1,0 +1,810 @@
+# PROMPT INICIAL PARA PLAYLIST-BUILDER-COMPLETE
+
+Actúa como un desarrollador Python sénior. Diseña, implementa, prueba y documenta una utilidad interactiva para generar playlists M3U a partir de una discoteca local organizada por carpetas.
+
+No te limites a proponer código parcial ni pseudocódigo. Entrega todos los archivos completos y ejecutables, junto con tests y documentación de uso.
+
+## 1. Objetivo
+
+Tengo mi música almacenada bajo una carpeta raíz con una estructura equivalente a esta:
+
+```text
+<MiDiscoteca>
+├── A-B
+│   ├── A. R. Rahman
+│   │   └── [1997] Vande Mataram
+│   ├── Aaron Copland
+│   │   ├── [1960] Billy The Kid Rodeo (Bernstein)
+│   │   └── [1996] Copland
+│   └── ...
+├── T-U-V-W-Y-Z
+│   ├── Talk Talk
+│   │   ├── [1986] The Colour of Spring
+│   │   ├── [1988] Spirit of Eden
+│   │   └── [1991] Laughing Stock
+│   └── ...
+```
+
+Dentro de cada carpeta de álbum están los archivos de audio.
+
+Las canciones contienen metadatos. Para esta herramienta interesan principalmente estas etiquetas:
+
+* `Artist`
+* `Genre`
+* `Year`
+
+El programa debe explorar toda la discoteca, permitir construir filtros interactivos de inclusión y exclusión, seleccionar canciones que cumplan dichos filtros y generar una playlist `.m3u`.
+
+## 2. Restricciones generales
+
+La solución debe estar escrita en Python 3.12 o posterior.
+
+Debe funcionar, como mínimo, en:
+
+* macOS (prioritario)
+* Windows 11
+* Linux
+
+No debe depender de herramientas externas instaladas globalmente, salvo Python. Las dependencias Python deben declararse expresamente.
+
+Usa una biblioteca robusta para leer metadatos, preferentemente `mutagen`.
+
+Usa una biblioteca adecuada para la interfaz interactiva de terminal. Preferentemente `prompt_toolkit`, porque se necesita:
+
+* Captura de teclas especiales.
+* Autocompletado.
+* Colores.
+* Historial de selecciones.
+* Gestión de `Tab`, `Enter`, `Esc`, `Backspace`, `+` y `-`.
+* Compatibilidad razonable entre Windows y terminales Unix.
+
+No implementes la interfaz mediante una sucesión de llamadas simples a `input()` si eso impide cumplir correctamente el comportamiento solicitado.
+
+La ruta raíz de la discoteca debe ser una constante editable dentro del código:
+
+```python
+MUSIC_ROOT = Path(r"...")
+```
+
+También debe existir una constante configurable para el margen de años:
+
+```python
+DEFAULT_YEAR_MARGIN = 5
+```
+
+No hardcodees otras rutas específicas de mi equipo.
+
+## 3. Archivos de audio soportados
+
+Soporta al menos:
+
+* `.mp3`
+* `.flac`
+* `.m4a`
+* `.mp4`
+* `.ogg`
+* `.opus`
+* `.wav`
+* `.wma`
+* `.ape`
+* `.aiff`
+* `.aif`
+
+La detección debe ser insensible a mayúsculas y minúsculas en la extensión.
+
+Si un formato concreto no permite leer alguna etiqueta mediante la biblioteca utilizada, el programa debe tratarla como ausente, registrar el caso para auditoría y continuar. Un archivo corrupto o ilegible no debe abortar todo el proceso.
+
+## 4. Modelo interno de una canción
+
+Representa cada canción mediante una estructura tipada, por ejemplo una `dataclass`, que incluya al menos:
+
+```text
+path
+relative_path
+artist
+genres
+year
+album
+album_directory
+size_bytes
+```
+
+Consideraciones:
+
+* `Artist` puede contener uno o varios artistas.
+* `Genre` puede contener uno o varios géneros.
+* Normaliza internamente valores repetidos, pero conserva una representación legible para mostrar al usuario.
+* `Year` puede aparecer como `1986`, `1986-04-01`, `1986/04/01` u otros formatos razonables. Extrae el primer año de cuatro cifras válido.
+* Solo considera años razonables. Define claramente el intervalo aceptado en una constante, por ejemplo de 1000 al año actual más uno.
+* El álbum debe obtenerse preferentemente de la etiqueta de álbum.
+* Si no existe etiqueta de álbum, usa como fallback el nombre de la carpeta que contiene la canción.
+* La identidad del álbum debe basarse en la ruta de su carpeta, no únicamente en el texto de la etiqueta, para evitar mezclar álbumes distintos con el mismo nombre.
+
+## 5. Normalización para búsquedas
+
+Las búsquedas de artistas y géneros deben ignorar:
+
+* Mayúsculas y minúsculas.
+* Acentos y diacríticos.
+* Diferencias Unicode equivalentes.
+* Espacios repetidos al principio, al final o entre palabras.
+
+Por ejemplo, buscar:
+
+```text
+bjork
+```
+
+debe encontrar:
+
+```text
+Björk
+```
+
+La normalización se utilizará únicamente para búsqueda, comparación y deduplicación. Al mostrar o guardar nombres, conserva su forma original.
+
+## 6. Parámetros de línea de comandos
+
+El programa principal debe aceptar:
+
+```text
+--size <N>
+```
+
+Tamaño máximo de la suma de las canciones seleccionadas, expresado en megabytes.
+
+* Valor por defecto: `8000`.
+* Interpreta un megabyte como `1_000_000` bytes.
+* Debe aceptar enteros y decimales positivos.
+* Rechaza valores cero o negativos con un mensaje claro.
+
+```text
+--max-album <N>
+```
+
+Número máximo de canciones seleccionadas de un mismo álbum.
+
+* Valor por defecto: `2`.
+* Debe ser un entero positivo.
+
+```text
+--copy <ruta>
+```
+
+Si se proporciona:
+
+* Crea el directorio de destino si no existe.
+* Copia allí las canciones seleccionadas.
+* Copia o genera allí también la playlist.
+* La playlist debe apuntar a las copias, no a los archivos originales.
+* No debe sobrescribir silenciosamente archivos distintos que tengan el mismo nombre.
+
+Si no se proporciona:
+
+* No copia archivos.
+* La playlist se guarda directamente dentro de `MUSIC_ROOT`.
+* Sus entradas deben apuntar a las canciones en su ubicación original.
+
+```text
+--audit <simple|full>
+```
+
+Activa el modo auditoría.
+
+`simple` debe mostrar:
+
+* Número total de archivos de audio examinados.
+* Número de canciones sin `Artist`.
+* Número de canciones sin `Genre`.
+* Número de canciones sin `Year`.
+* Número de canciones a las que les falta al menos una de las tres etiquetas.
+* Número de archivos ilegibles o con error de metadatos.
+
+`full` debe mostrar todo lo anterior y, además:
+
+* Cada archivo afectado.
+* Qué etiquetas le faltan.
+* Los errores concretos de lectura, cuando existan.
+
+Aclara e implementa el comportamiento del modo auditoría de esta manera:
+
+* La auditoría se realiza durante el escaneo normal.
+* Tras mostrar el informe, el programa continúa con la creación de la playlist.
+* Añade además un parámetro opcional `--audit-only` que genere el informe y termine sin abrir la interfaz interactiva.
+
+Incluye también:
+
+```text
+--seed <N>
+```
+
+Semilla opcional para hacer reproducible la selección aleatoria.
+
+```text
+--rescan
+```
+
+Fuerza un nuevo escaneo e ignora cualquier caché existente.
+
+```text
+--help
+```
+
+Muestra ayuda completa.
+
+Usa `argparse`.
+
+## 7. Caché del catálogo
+
+Escanear miles de archivos puede ser lento. Implementa una caché local segura.
+
+Requisitos:
+
+* La caché puede guardarse dentro de `MUSIC_ROOT`, por ejemplo como `.playlist_catalog.json`.
+* Debe almacenar la información necesaria para evitar releer todos los metadatos en cada ejecución.
+* Usa la ruta, el tamaño y la fecha de modificación para detectar archivos nuevos o modificados.
+* Elimina de la caché los archivos que ya no existan.
+* Los errores de caché no deben impedir ejecutar el programa.
+* La escritura debe ser atómica: escribe primero a un archivo temporal y reemplaza después.
+* `--rescan` debe forzar la reconstrucción completa.
+
+No guardes rutas absolutas cuando sea razonable usar rutas relativas a `MUSIC_ROOT`.
+
+## 8. Inicio de la interfaz
+
+Al terminar el escaneo, muestra algo parecido a:
+
+```text
+¡Creemos una playlist!
+
+Encontrados:
+- 1522 artistas
+- 95 géneros
+- 18437 canciones
+- años disponibles: 1918-2026
+
+Usa:
+  + para incluir
+  - para excluir
+  Tab para recorrer coincidencias
+  Enter para aceptar
+  Esc para volver
+```
+
+La interfaz debe mostrar en todo momento instrucciones breves y el estado actual.
+
+## 9. Flujo interactivo
+
+El flujo consta de estas pantallas:
+
+1. Artistas.
+2. Géneros.
+3. Año mínimo.
+4. Año máximo.
+5. Nombre de la playlist.
+6. Resumen y confirmación final.
+
+### 9.1. Selección de artistas
+
+El usuario debe poder crear dos conjuntos:
+
+* Artistas incluidos.
+* Artistas excluidos.
+
+Comportamiento:
+
+* Pulsar `+` inicia la introducción de un artista para incluir.
+* Pulsar `-` inicia la introducción de un artista para excluir.
+* Tras pulsar `+` o `-`, el usuario comienza a escribir.
+* La búsqueda debe encontrar coincidencias por cualquier parte del nombre, no únicamente por prefijo.
+* La búsqueda debe ignorar mayúsculas, minúsculas y acentos.
+* Muestra la primera coincidencia disponible como sugerencia.
+* La parte ya escrita debe verse normalmente.
+* La parte sugerida restante debe verse atenuada o en gris oscuro.
+* `Tab` recorre las distintas coincidencias.
+* `Shift+Tab`, cuando sea viable con la biblioteca elegida, recorre las coincidencias en sentido inverso.
+* `Enter` confirma la coincidencia actual o el valor escrito si coincide exactamente con una opción válida.
+* No deben poder introducirse artistas inexistentes.
+* Una inclusión confirmada debe aparecer en verde.
+* Una exclusión confirmada debe aparecer en rojo.
+* No permitas que el mismo artista esté simultáneamente incluido y excluido.
+* Si el usuario intenta hacerlo, mueve el artista al conjunto de la última operación y muestra una indicación breve.
+* Pulsar `Enter` con la línea vacía y sin una operación activa pasa a la siguiente pantalla.
+* Debe ser posible incluir o excluir múltiples artistas antes de continuar.
+
+### 9.2. Selección de géneros
+
+Debe funcionar exactamente igual que la selección de artistas:
+
+* Inclusiones en verde.
+* Exclusiones en rojo.
+* Autocompletado normalizado.
+* `Tab` para recorrer coincidencias.
+* `Enter` vacío para pasar a la siguiente pantalla.
+
+### 9.3. Selección de años
+
+Muestra:
+
+```text
+Desde el año (mín. 1918):
+```
+
+Después:
+
+```text
+Hasta el año (máx. 2026):
+```
+
+Reglas:
+
+* Ambos campos son opcionales.
+* Solo se admiten años enteros válidos.
+* Si se informan ambos, debe cumplirse `desde <= hasta`.
+* Si solo se informa el año mínimo, el máximo será:
+
+```text
+año mínimo + DEFAULT_YEAR_MARGIN
+```
+
+limitado al máximo disponible en la colección.
+
+* Si solo se informa el año máximo, el mínimo será:
+
+```text
+año máximo - DEFAULT_YEAR_MARGIN
+```
+
+limitado al mínimo disponible en la colección.
+
+* Si ambos quedan vacíos, no se aplica ningún filtro por año.
+* Una canción sin año nunca debe cumplir un filtro de años.
+* Si no hay filtro de años, las canciones sin año pueden participar, salvo que algún otro filtro las excluya.
+
+### 9.4. Nombre de la playlist
+
+Pregunta:
+
+```text
+¿Qué nombre le damos a la playlist?
+```
+
+Reglas:
+
+* No permitas un nombre vacío.
+* El usuario puede escribir el nombre con o sin extensión `.m3u`.
+* Añade `.m3u` si falta.
+* Sanea únicamente los caracteres ilegales para nombres de archivo del sistema operativo.
+* No conviertas innecesariamente espacios o caracteres Unicode válidos.
+* Impide nombres como `.` o `..`.
+* Si el archivo ya existe, pregunta antes de sobrescribirlo o propón automáticamente un sufijo incremental como `Playlist (2).m3u`.
+
+### 9.5. Resumen final
+
+Antes de generar nada, muestra un resumen:
+
+```text
+Artistas incluidos: ...
+Artistas excluidos: ...
+Géneros incluidos: ...
+Géneros excluidos: ...
+Años: ...
+Tamaño máximo: ...
+Máximo por álbum: ...
+Destino: ...
+```
+
+También muestra una estimación de:
+
+* Canciones candidatas.
+* Tamaño total de todas las candidatas.
+* Canciones que previsiblemente entrarán en la playlist.
+
+Permite:
+
+* Confirmar.
+* Volver a la pantalla anterior.
+* Cancelar sin crear archivos.
+
+## 10. Comportamiento de teclas
+
+El comportamiento requerido es:
+
+### `Esc`
+
+* Si se está escribiendo una búsqueda dentro de la pantalla actual, cancela y borra toda esa búsqueda parcial, pero conserva las selecciones ya confirmadas.
+* Si no existe una búsqueda parcial, vuelve a la pantalla anterior.
+* La pantalla anterior debe conservar exactamente su estado.
+* En la primera pantalla, `Esc` debe pedir confirmación para salir.
+
+### `Backspace`
+
+* Si hay texto escrito, borra el último carácter.
+* Si no hay texto, pero se ha pulsado `+` o `-` y todavía no se confirmó una opción, cancela esa operación.
+* Si no hay texto ni operación activa, elimina la última selección confirmada en la pantalla actual.
+* La eliminación debe respetar el orden real de selección, ya sea una inclusión o una exclusión.
+
+### `Enter`
+
+* Si existe una coincidencia válida en edición, la confirma.
+* Si no hay edición activa, pasa a la siguiente pantalla.
+* En campos numéricos, valida el valor antes de continuar.
+
+### `Tab`
+
+* Solo debe interferir con la interfaz cuando se está seleccionando artista o género.
+* Recorre las coincidencias compatibles con el texto escrito.
+
+## 11. Semántica de filtros
+
+Implementa exactamente estas reglas.
+
+### Artistas
+
+Si la lista de artistas incluidos está vacía:
+
+* Se aceptan canciones de cualquier artista, salvo los excluidos.
+
+Si la lista de artistas incluidos no está vacía:
+
+* La canción debe tener al menos un artista incluido.
+
+En todos los casos:
+
+* Si la canción contiene al menos un artista excluido, queda descartada.
+
+Una canción sin `Artist`:
+
+* No cumple una lista positiva de artistas.
+* Puede participar si no existe una lista positiva y los demás filtros se cumplen.
+
+### Géneros
+
+Aplica la misma lógica:
+
+* Inclusiones mediante OR: basta con que coincida al menos un género incluido.
+* Exclusiones con prioridad: si coincide algún género excluido, se descarta.
+* Una canción sin género no cumple una lista positiva de géneros.
+* Puede participar cuando no exista lista positiva.
+
+### Años
+
+* El intervalo es inclusivo.
+* Las exclusiones no se aplican a años porque la interfaz solo define un intervalo.
+* Una canción sin año queda descartada cuando existe filtro temporal.
+
+### Precedencia
+
+Las exclusiones siempre tienen prioridad sobre las inclusiones.
+
+Una canción debe cumplir simultáneamente:
+
+```text
+filtro de artista
+AND filtro de género
+AND filtro de año
+```
+
+## 12. Selección de canciones
+
+No tomes simplemente los primeros archivos devueltos por el sistema de archivos.
+
+El proceso debe:
+
+1. Obtener todas las canciones candidatas.
+2. Agruparlas por álbum.
+3. Barajar las canciones de cada álbum.
+4. Barajar el orden de los álbumes.
+5. Realizar una selección equilibrada por rondas:
+
+   * En cada ronda se intenta añadir como máximo una canción de cada álbum.
+   * Nunca se supera `--max-album`.
+   * Se continúa por rondas hasta alcanzar el tamaño máximo o agotar las candidatas.
+6. No añadir una canción si con ella se supera `--size`.
+7. Si una canción concreta no cabe, continuar intentando otras canciones más pequeñas.
+8. Terminar cuando ya no exista ninguna canción restante que pueda añadirse sin superar el límite.
+
+El algoritmo debe evitar favorecer sistemáticamente los primeros artistas o álbumes del árbol.
+
+Con `--seed`, el resultado debe ser reproducible si el catálogo y los filtros no han cambiado.
+
+El tamaño final nunca debe superar el máximo configurado.
+
+Si ninguna canción cumple los filtros, no crees una playlist vacía sin avisar. Muestra un mensaje y permite volver a editar los filtros o cancelar.
+
+## 13. Generación del archivo M3U
+
+Genera un archivo M3U de texto compatible y portable.
+
+Requisitos:
+
+* Codificación UTF-8.
+* Usa extensión `.m3u`.
+* Incluye como primera línea:
+
+```text
+#EXTM3U
+```
+
+* Incluye antes de cada archivo una línea `#EXTINF`.
+* Si la duración está disponible, escribe su duración entera en segundos.
+* Si no está disponible, usa `-1`.
+* El título legible debe usar, en este orden de preferencia:
+
+  1. `Artist - Title`
+  2. `Title`
+  3. El nombre del archivo sin extensión.
+
+Ejemplo:
+
+```text
+#EXTM3U
+#EXTINF:238,Talk Talk - Life's What You Make It
+T-U-V-W-Y-Z/Talk Talk/[1986] The Colour of Spring/01 - Life's What You Make It.flac
+```
+
+Cuando no se utilice `--copy`:
+
+* Guarda el `.m3u` dentro de `MUSIC_ROOT`.
+* Usa rutas relativas al directorio que contiene la playlist siempre que sea posible.
+* Usa `/` como separador dentro del M3U para mejorar la portabilidad.
+
+Cuando se utilice `--copy`:
+
+* Guarda el `.m3u` dentro del destino.
+* Usa rutas relativas desde el `.m3u` hasta las canciones copiadas.
+* Usa `/` como separador en el M3U.
+
+No escribas rutas entre comillas salvo que el formato lo requiera. Los espacios en las rutas son válidos.
+
+Usa saltos de línea compatibles y consistentes. Documenta la elección.
+
+## 14. Copia de canciones
+
+Cuando se indique `--copy`, evita colisiones y pérdida de contexto.
+
+Copia las canciones con esta estructura:
+
+```text
+<destino>/
+├── <nombre-playlist>.m3u
+└── Music/
+    └── <ruta relativa original dentro de MiDiscoteca>
+```
+
+Ejemplo:
+
+```text
+<destino>/
+├── Viaje.m3u
+└── Music/
+    └── T-U-V-W-Y-Z/
+        └── Talk Talk/
+            └── [1986] The Colour of Spring/
+                └── 01 - Life's What You Make It.flac
+```
+
+Así se evitan colisiones entre canciones con el mismo nombre.
+
+Requisitos:
+
+* Conserva fechas y metadatos del archivo mediante `shutil.copy2`.
+* No modifiques los archivos originales.
+* Si el destino está dentro de `MUSIC_ROOT`, evita que el escáner vuelva a tratar las copias como parte del catálogo durante esa misma ejecución.
+* No dejes una playlist final que apunte a archivos cuya copia haya fallado.
+* Copia primero a una ubicación temporal o controla rigurosamente los errores.
+* Si alguna copia falla, muestra un informe claro.
+* La operación debe ser lo más transaccional posible:
+
+  * No publiques el `.m3u` definitivo hasta que las copias necesarias hayan terminado correctamente.
+  * Limpia archivos temporales creados por una ejecución fallida.
+  * No elimines archivos preexistentes ajenos a la ejecución.
+
+## 15. Errores y cancelación
+
+El programa debe manejar correctamente:
+
+* `Ctrl+C`.
+* `Ctrl+D` cuando corresponda.
+* Terminal cerrada.
+* Archivos eliminados durante el proceso.
+* Permisos insuficientes.
+* Metadatos corruptos.
+* Errores de codificación.
+* Destinos no escribibles.
+* Playlist existente.
+* Caché corrupta.
+
+Ante `Ctrl+C`:
+
+* Cancela limpiamente.
+* No muestres un traceback salvo que se active un modo de depuración.
+* No dejes archivos temporales.
+* Devuelve un código de salida no cero.
+
+Usa mensajes de error claros e indica la ruta problemática cuando corresponda.
+
+## 16. Logging
+
+Añade:
+
+```text
+--verbose
+```
+
+para mostrar información detallada del escaneo, caché, filtros, selección y copia.
+
+Añade:
+
+```text
+--debug
+```
+
+para activar logs de depuración y tracebacks.
+
+Por defecto, la salida debe ser limpia y orientada al usuario.
+
+## 17. Estructura del proyecto
+
+Entrega una estructura mantenible, por ejemplo:
+
+```text
+playlist_builder/
+├── pyproject.toml
+├── README.md
+├── crear_playlist.py
+├── playlist_builder/
+│   ├── __init__.py
+│   ├── cli.py
+│   ├── models.py
+│   ├── scanner.py
+│   ├── metadata.py
+│   ├── cache.py
+│   ├── filters.py
+│   ├── selector.py
+│   ├── m3u.py
+│   ├── copier.py
+│   ├── audit.py
+│   ├── normalization.py
+│   └── ui.py
+└── tests/
+    ├── test_normalization.py
+    ├── test_year_parsing.py
+    ├── test_filters.py
+    ├── test_selector.py
+    ├── test_m3u.py
+    ├── test_cache.py
+    └── test_copy.py
+```
+
+Puedes ajustar la estructura si existe una razón técnica clara, pero no entregues un único archivo monolítico difícil de probar.
+
+Incluye un punto de entrada sencillo:
+
+```bash
+python crear_playlist.py --size 4000
+```
+
+Y, si es razonable, configura también un comando instalable:
+
+```bash
+crear-playlist --size 4000
+```
+
+No dependas exclusivamente de un archivo `.sh`, porque debe funcionar también en Windows. Puedes incluir opcionalmente launchers:
+
+* `crear-playlist.sh`
+* `crear-playlist.cmd`
+
+pero la lógica debe estar en Python.
+
+## 18. Tests
+
+Escribe tests automatizados con `pytest`.
+
+Como mínimo, cubre:
+
+* Normalización sin distinguir mayúsculas ni acentos.
+* Extracción de años desde distintos formatos.
+* Inclusiones y exclusiones de artista.
+* Inclusiones y exclusiones de género.
+* Precedencia de exclusiones.
+* Canciones sin tags.
+* Intervalos de años.
+* Cálculo del margen cuando falta uno de los extremos.
+* Límite máximo por álbum.
+* Límite máximo de tamaño.
+* Caso donde una canción grande no cabe, pero otras pequeñas sí.
+* Reproducibilidad mediante `--seed`.
+* Rutas M3U sin copia.
+* Rutas M3U con copia.
+* Caracteres Unicode y espacios.
+* Colisiones de nombres.
+* Caché válida, obsoleta y corrupta.
+* Fallos parciales de copia.
+* Auditoría simple y completa.
+
+Los tests no deben depender de mi colección real. Crea archivos temporales y mocks de metadatos cuando sea necesario.
+
+Para las partes de la interfaz difíciles de probar de extremo a extremo, separa la lógica de estado de la representación de terminal y prueba la máquina de estados de manera aislada.
+
+## 19. Calidad del código
+
+Requisitos:
+
+* Type hints completos.
+* `pathlib`, no concatenación manual de rutas.
+* Separación clara entre escaneo, filtrado, selección, interfaz, copia y escritura M3U.
+* Evita funciones excesivamente largas.
+* No uses `except Exception: pass`.
+* No ocultes errores sin registrarlos.
+* No cambies el directorio de trabajo global como parte de la lógica.
+* No uses variables globales mutables, salvo constantes de configuración.
+* Evita dependencias innecesarias.
+* Usa operaciones atómicas para archivos de caché y playlist.
+* Documenta las decisiones no evidentes.
+
+Configura herramientas de calidad, preferentemente:
+
+* `ruff`
+* `mypy`
+* `pytest`
+
+El proyecto debe superar sus propias comprobaciones.
+
+## 20. README
+
+Incluye instrucciones exactas para:
+
+* Crear un entorno virtual.
+* Instalar dependencias.
+* Configurar `MUSIC_ROOT`.
+* Ejecutar la aplicación.
+* Ejecutar la auditoría.
+* Usar `--copy`.
+* Ejecutar los tests.
+* Interpretar inclusiones y exclusiones.
+* Entender el límite de tamaño y el máximo por álbum.
+* Solucionar problemas habituales de terminal y metadatos.
+
+Incluye ejemplos reales de comandos:
+
+```bash
+python crear_playlist.py
+python crear_playlist.py --size 4000
+python crear_playlist.py --size 4000 --max-album 1
+python crear_playlist.py --audit simple
+python crear_playlist.py --audit full --audit-only
+python crear_playlist.py --copy "D:\Musica para el coche"
+python crear_playlist.py --size 8000 --seed 12345
+```
+
+## 21. Entrega esperada
+
+Trabaja en este orden:
+
+1. Analiza los requisitos.
+2. Señala brevemente cualquier incompatibilidad técnica real.
+3. Diseña la arquitectura.
+4. Implementa todos los archivos.
+5. Ejecuta los tests.
+6. Ejecuta `ruff` y `mypy`.
+7. Corrige todos los fallos encontrados.
+8. Haz una prueba manual con una colección temporal de ejemplo.
+9. Entrega los archivos completos finales.
+10. Resume:
+
+* Arquitectura.
+* Dependencias.
+* Comandos de ejecución.
+* Tests ejecutados y resultados.
+* Limitaciones conocidas reales.
+
+No afirmes que has ejecutado tests o comprobaciones si no los has ejecutado realmente.
+
+No entregues únicamente un diff. Quiero el contenido completo de todos los archivos nuevos o modificados.
+
+Si tienes acceso a archivos de canciones o playlists M3U de ejemplo adjuntos, examínalos y adapta el lector y el formato de salida a esos casos reales. No modifiques los originales.
+
+Cuando un detalle menor no esté especificado, elige la solución más segura, portable y mantenible, y documenta la decisión. No interrumpas el trabajo por cuestiones menores que puedan resolverse razonablemente.
+

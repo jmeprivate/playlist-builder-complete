@@ -29,10 +29,16 @@ def deduplicate_songs(songs: list[Song]) -> list[Song]:
 
     Only size-collision groups are read.  A file that cannot be hashed remains a
     candidate because its content identity could not be established.
+
+    Grouping relies on ``song.size_bytes`` from the scan/cache rather than a fresh
+    ``stat()``.  If a file changed on disk since the last scan without invalidating
+    its cache entry, two files with identical current content may land in different
+    size buckets and never be compared.  This can only miss a deduplication (files
+    are never removed unless their hashes match), so it is a benign inconsistency.
     """
-    by_size: dict[int, list[Song]] = defaultdict(list)
-    for song in songs:
-        by_size[song.size_bytes].append(song)
+    by_size: dict[int, list[tuple[int, Song]]] = defaultdict(list)
+    for index, song in enumerate(songs):
+        by_size[song.size_bytes].append((index, song))
 
     collision_groups = [group for group in by_size.values() if len(group) >= 2]
     hash_candidates = sum(map(len, collision_groups))
@@ -42,28 +48,28 @@ def deduplicate_songs(songs: list[Song]) -> list[Song]:
         hash_candidates,
         len(collision_groups),
     )
-    removed: set[Path] = set()
+    removed: set[int] = set()
     for size_group in collision_groups:
-        by_digest: dict[str, list[Song]] = defaultdict(list)
-        for song in sorted(size_group, key=_stable_path_key):
+        by_digest: dict[str, list[tuple[int, Song]]] = defaultdict(list)
+        for index, song in sorted(size_group, key=lambda item: _stable_path_key(item[1])):
             try:
                 digest = _sha256(song.path)
             except OSError as exc:
                 LOGGER.warning("No se pudo calcular SHA-256 de %s: %s", song.relative_path, exc)
                 continue
-            LOGGER.info("SHA-256 %s %s", digest, song.relative_path)
-            by_digest[digest].append(song)
+            LOGGER.debug("SHA-256 %s %s", digest, song.relative_path)
+            by_digest[digest].append((index, song))
         for digest, identical in by_digest.items():
             if len(identical) < 2:
                 continue
-            ordered = sorted(identical, key=_stable_path_key)
-            representative = ordered[0]
-            removed.update(song.path for song in ordered[1:])
+            # ``identical`` is already in stable order (built from a sorted scan).
+            representative = identical[0][1]
+            removed.update(index for index, _ in identical[1:])
             LOGGER.info(
                 "Duplicadas SHA-256 %s: se conserva %s; se omiten %s",
                 digest,
                 representative.relative_path,
-                ", ".join(song.relative_path.as_posix() for song in ordered[1:]),
+                ", ".join(song.relative_path.as_posix() for _, song in identical[1:]),
             )
 
-    return [song for song in songs if song.path not in removed]
+    return [song for index, song in enumerate(songs) if index not in removed]

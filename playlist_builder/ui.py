@@ -494,6 +494,7 @@ def run_interactive(
             state.artists.notice = " ".join(filter(None, (state.artists.notice, year_notice)))
     session_rng = random.Random() if seed is None else random.Random(seed)
     candidates: list[Song] = []
+    dedup_cache: dict[FilterSpec, list[Song]] = {}
     skipped_by_artist_quota = 0
     screen = 0
     while True:
@@ -568,7 +569,11 @@ def run_interactive(
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
             if deduplicate:
-                candidates = deduplicate_songs(candidates)
+                cached = dedup_cache.get(spec)
+                if cached is None:
+                    cached = deduplicate_songs(candidates)
+                    dedup_cache[spec] = cached
+                candidates = cached
             if not state.selected:
                 selection = select_balanced_with_stats(
                     candidates,

@@ -25,7 +25,7 @@ from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
 from .filters import complete_year_range, filter_songs
 from .models import FilterSpec, Song
 from .normalization import deduplicate_display_values, normalize_for_search
-from .selector import select_balanced
+from .selector import SelectionResult, select_balanced_with_stats
 
 BACK = "__BACK__"
 NoticeLevel = Literal["info", "warning", "error"]
@@ -361,12 +361,15 @@ def _different_selection(
     max_size_bytes: int,
     max_per_album: int,
     rng: random.Random,
-) -> list[Song]:
+    max_per_artist: int | None,
+) -> SelectionResult:
     """Retry a few unbiased shuffles when an alternative ordering exists."""
-    result = previous
+    result = SelectionResult(previous, 0)
     for _ in range(8):
-        result = select_balanced(candidates, max_size_bytes, max_per_album, rng)
-        if result != previous or len(candidates) < 2:
+        result = select_balanced_with_stats(
+            candidates, max_size_bytes, max_per_album, rng, max_per_artist
+        )
+        if result.songs != previous or len(candidates) < 2:
             break
     return result
 
@@ -393,6 +396,7 @@ def run_interactive(
     *,
     max_size_bytes: int,
     max_per_album: int,
+    max_per_artist: int | None = None,
     destination: Path,
     seed: int | None,
     surprise: bool = False,
@@ -431,6 +435,7 @@ def run_interactive(
     state = UIState()
     session_rng = random.Random() if seed is None else random.Random(seed)
     candidates: list[Song] = []
+    skipped_by_artist_quota = 0
     screen = 0
     while True:
         if screen == 0:
@@ -478,6 +483,7 @@ def run_interactive(
                     available_max,
                 )
                 state.selected = []
+                skipped_by_artist_quota = 0
                 screen = 5
             except ValueError as exc:
                 print(f"Valor no válido: {exc}")
@@ -485,12 +491,15 @@ def run_interactive(
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
             if not state.selected:
-                state.selected = select_balanced(
+                selection = select_balanced_with_stats(
                     candidates,
                     max_size_bytes,
                     max_per_album,
                     seed if seed is not None else session_rng,
+                    max_per_artist,
                 )
+                state.selected = selection.songs
+                skipped_by_artist_quota = selection.skipped_by_artist_quota
             if not state.selected:
                 choice = _normalize_choice(
                     _simple_prompt("No hay canciones seleccionables. [f]iltros / [c]ancelar: ")
@@ -535,13 +544,16 @@ def run_interactive(
                     if action in {"f", BACK}:
                         screen = 4
                 else:
-                    state.selected = _different_selection(
+                    selection = _different_selection(
                         candidates,
                         state.selected,
                         max_size_bytes,
                         max_per_album,
                         session_rng,
+                        max_per_artist,
                     )
+                    state.selected = selection.songs
+                    skipped_by_artist_quota = selection.skipped_by_artist_quota
             elif choice == "c":
                 return None
         elif screen == 6:
@@ -577,6 +589,7 @@ def run_interactive(
             print(f"Años: {years_summary}")
             print(f"Tamaño máximo: {_format_mb(max_size_bytes)}")
             print(f"Máximo por álbum: {max_per_album}")
+            print(f"Máximo por artista de pista: {max_per_artist or 'sin límite'}")
             print(f"Destino: {destination}")
             if surprise:
                 print("Modo sorpresa activo: composición oculta")
@@ -584,6 +597,8 @@ def run_interactive(
                 candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
                 selected_size = _format_mb(sum(song.size_bytes for song in state.selected))
                 print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
+                if max_per_artist is not None:
+                    print(f"Candidatas omitidas por cuota de artista: {skipped_by_artist_quota}")
                 print(f"Canciones que entrarán: {len(state.selected)} ({selected_size})")
             choice = _normalize_choice(
                 _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ")

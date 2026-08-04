@@ -5,6 +5,7 @@ import pytest
 
 from playlist_builder import ui
 from playlist_builder.models import Song
+from playlist_builder.selector import SelectionResult
 
 
 def _drive_prompts(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> None:
@@ -69,13 +70,20 @@ def test_retry_reuses_candidates_and_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     songs = [song_factory(title="First"), song_factory(title="Second")]
-    calls: list[tuple[list[Song], int, int]] = []
+    calls: list[tuple[list[Song], int, int, int | None]] = []
 
-    def select(candidates: list[Song], size: int, album: int, seed: object) -> list[Song]:
-        calls.append((list(candidates), size, album))
-        return list(reversed(candidates)) if len(calls) == 1 else list(candidates)
+    def select(
+        candidates: list[Song],
+        size: int,
+        album: int,
+        seed: object,
+        artist: int | None,
+    ) -> SelectionResult:
+        calls.append((list(candidates), size, album, artist))
+        selected = list(reversed(candidates)) if len(calls) == 1 else list(candidates)
+        return SelectionResult(selected, 0)
 
-    monkeypatch.setattr(ui, "select_balanced", select)
+    monkeypatch.setattr(ui, "select_balanced_with_stats", select)
     _drive_prompts(monkeypatch, ["", "", "r", "a", "Lista", "s"])
     result = ui.run_interactive(
         songs,
@@ -83,8 +91,9 @@ def test_retry_reuses_candidates_and_limits(
         max_per_album=1,
         destination=tmp_path,
         seed=None,
+        max_per_artist=3,
     )
     assert result is not None
     assert len(calls) == 2
-    assert calls[0] == calls[1] == (songs, 321, 1)
+    assert calls[0] == calls[1] == (songs, 321, 1, 3)
     assert result[1] == songs

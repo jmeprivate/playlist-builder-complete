@@ -14,6 +14,7 @@ def _write_config(path: Path, *, surprise: bool = False) -> Path:
         "default_size_mb = 8000\n"
         "default_max_album = 2\n"
         "retry_error_after_days = 7\n"
+        "default_max_artist = 0\n"
         "cache_filename = .cache.json\n"
         "min_reasonable_year = 1000\n"
         "max_reasonable_year_offset = 1\n"
@@ -27,13 +28,19 @@ def _write_config(path: Path, *, surprise: bool = False) -> Path:
 
 
 def test_cli_accepts_decimal_size_and_rejects_invalid_values() -> None:
-    args = build_parser().parse_args(["--size", "12.5", "--max-album", "3"])
+    args = build_parser().parse_args(["--size", "12.5", "--max-album", "3", "--max-artist", "2"])
     assert args.size == 12.5
     assert args.max_album == 3
+    assert args.max_artist == 2
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--size", "0"])
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--max-album", "1.5"])
+
+
+@pytest.mark.parametrize("value", ["0", "", "sin límite", "sin limite"])
+def test_cli_accepts_unlimited_artist_quota(value: str) -> None:
+    assert build_parser().parse_args(["--max-artist", value]).max_artist is None
 
 
 def test_surprise_flags_are_explicit_and_mutually_exclusive() -> None:

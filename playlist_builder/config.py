@@ -18,6 +18,8 @@ DEFAULT_YEAR_MARGIN = 5
 DEFAULT_SIZE_MB = 8000.0
 DEFAULT_MAX_ALBUM = 2
 DEFAULT_RETRY_ERROR_AFTER_DAYS = 7.0
+# 0 conserva el comportamiento histórico: sin cuota por artista de pista.
+DEFAULT_MAX_ARTIST = 0
 CACHE_FILENAME = ".playlist_catalog.json"
 CONFIG_FILENAME = "config.ini"
 MIN_REASONABLE_YEAR = 1000
@@ -36,6 +38,7 @@ class Settings:
     default_size_mb: float
     default_max_album: int
     retry_error_after_days: float
+    default_max_artist: int
     cache_filename: str
     min_reasonable_year: int
     max_reasonable_year_offset: int
@@ -97,12 +100,14 @@ def _problem(path: Path, key: str, message: str) -> ConfigError:
 def _publish_compatibility_defaults(settings: Settings) -> None:
     global MUSIC_ROOT, DEFAULT_YEAR_MARGIN, DEFAULT_SIZE_MB, DEFAULT_MAX_ALBUM
     global DEFAULT_RETRY_ERROR_AFTER_DAYS
+    global DEFAULT_MAX_ARTIST
     global CACHE_FILENAME, MIN_REASONABLE_YEAR, MAX_REASONABLE_YEAR_OFFSET, AUDIO_EXTENSIONS
     MUSIC_ROOT = settings.music_root
     DEFAULT_YEAR_MARGIN = settings.default_year_margin
     DEFAULT_SIZE_MB = settings.default_size_mb
     DEFAULT_MAX_ALBUM = settings.default_max_album
     DEFAULT_RETRY_ERROR_AFTER_DAYS = settings.retry_error_after_days
+    DEFAULT_MAX_ARTIST = settings.default_max_artist
     CACHE_FILENAME = settings.cache_filename
     MIN_REASONABLE_YEAR = settings.min_reasonable_year
     MAX_REASONABLE_YEAR_OFFSET = settings.max_reasonable_year_offset
@@ -137,6 +142,7 @@ def load_config(path: Path | str | None = None) -> Settings:
         "default_size_mb",
         "default_max_album",
         "retry_error_after_days",
+        "default_max_artist",
         "cache_filename",
         "min_reasonable_year",
         "max_reasonable_year_offset",
@@ -179,6 +185,15 @@ def load_config(path: Path | str | None = None) -> Settings:
             raise _problem(source, key, "debe ser un número no negativo") from exc
         if not math.isfinite(value) or value < 0:
             raise _problem(source, key, "debe ser un número finito no negativo")
+        return value
+
+    def nonnegative_int(key: str) -> int:
+        try:
+            value = int(section[key])
+        except ValueError as exc:
+            raise _problem(source, key, "debe ser un entero no negativo") from exc
+        if value < 0:
+            raise _problem(source, key, "no puede ser negativo")
         return value
 
     raw_root = section["music_root"].strip()
@@ -235,6 +250,7 @@ def load_config(path: Path | str | None = None) -> Settings:
         default_size_mb=positive_float("default_size_mb"),
         default_max_album=positive_int("default_max_album"),
         retry_error_after_days=nonnegative_float("retry_error_after_days"),
+        default_max_artist=nonnegative_int("default_max_artist"),
         cache_filename=cache,
         min_reasonable_year=minimum,
         max_reasonable_year_offset=offset,

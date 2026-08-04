@@ -1,6 +1,28 @@
+from pathlib import Path
+
 import pytest
 
 from playlist_builder.cli import _run, build_parser, resolve_surprise
+from playlist_builder.config import load_config
+
+
+def _write_config(path: Path, *, surprise: bool = False) -> Path:
+    path.write_text(
+        "[playlist_builder]\n"
+        "music_root = music\n"
+        "default_year_margin = 5\n"
+        "default_size_mb = 8000\n"
+        "default_max_album = 2\n"
+        "cache_filename = .cache.json\n"
+        "min_reasonable_year = 1000\n"
+        "max_reasonable_year_offset = 1\n"
+        "audio_extensions = .mp3, .flac\n"
+        f"surprise_mode = {'true' if surprise else 'false'}\n"
+        "preview_entries = 5\n"
+        "copy_structure = flat\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_cli_accepts_decimal_size_and_rejects_invalid_values() -> None:
@@ -29,11 +51,8 @@ def test_surprise_cli_value_precedes_config() -> None:
 
 
 def test_full_audit_is_rejected_before_scanning_in_surprise_mode(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:  # type: ignore[no-untyped-def]
-    (tmp_path / "config.ini").write_text(
-        "[playlist_builder]\nsurprise_mode = true\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(tmp_path)
+    tmp_path: Path,
+) -> None:
+    settings = load_config(_write_config(tmp_path / "config.ini", surprise=True))
     with pytest.raises(ValueError, match="audit full"):
-        _run(build_parser().parse_args(["--audit", "full"]))
+        _run(build_parser(settings).parse_args(["--audit", "full"]), settings)

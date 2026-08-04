@@ -28,12 +28,11 @@ crear-playlist = "playlist_builder.cli:main"
 packages = ["playlist_builder"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"playlist_builder/config.ini" = "playlist_builder/config.ini"
+"config.ini" = "playlist_builder/config.ini"
 
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

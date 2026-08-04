@@ -19,14 +19,26 @@ _MULTI_VALUE_RE = re.compile(r"[;\x00]+")
 _GENRE_MULTI_VALUE_RE = re.compile(r"[,;\x00]+")
 
 
-def parse_year(value: object, current_year: int | None = None) -> int | None:
-    ceiling = (current_year or datetime.now().year) + MAX_REASONABLE_YEAR_OFFSET
+def parse_year(
+    value: object,
+    current_year: int | None = None,
+    *,
+    min_reasonable_year: int | None = None,
+    max_reasonable_year_offset: int | None = None,
+) -> int | None:
+    minimum = MIN_REASONABLE_YEAR if min_reasonable_year is None else min_reasonable_year
+    offset = (
+        MAX_REASONABLE_YEAR_OFFSET
+        if max_reasonable_year_offset is None
+        else max_reasonable_year_offset
+    )
+    ceiling = (current_year or datetime.now().year) + offset
     values: Iterable[object] = value if isinstance(value, (list, tuple)) else (value,)
     for item in values:
         match = _YEAR_RE.search(str(item))
         if match:
             year = int(match.group(1))
-            if MIN_REASONABLE_YEAR <= year <= ceiling:
+            if minimum <= year <= ceiling:
                 return year
     return None
 
@@ -50,15 +62,19 @@ def _tag_values(
     return list(deduplicate_display_values(result))
 
 
-def read_song(path: Path, root: Path) -> Song:
+def read_song(
+    path: Path,
+    root: Path,
+    *,
+    min_reasonable_year: int | None = None,
+    max_reasonable_year_offset: int | None = None,
+) -> Song:
     audio = MutagenFile(path, easy=True)
     if audio is None:
         raise ValueError("mutagen no reconoce el formato o no pudo abrirlo")
     tags: Mapping[str, Any] | None = audio.tags
     artists = _tag_values(tags, ("artist",))
     if not artists:
-        # Algunos WMA/ASF exponen Artist bajo Author. AlbumArtist no es un sustituto:
-        # en recopilatorios suele ser "Various Artists" y alteraría los filtros.
         artists = _tag_values(tags, ("author",))
     album_artists = _tag_values(tags, ("albumartist",))
     genres = _tag_values(tags, ("genre",), _GENRE_MULTI_VALUE_RE)
@@ -66,7 +82,6 @@ def read_song(path: Path, root: Path) -> Song:
     albums = _tag_values(tags, ("album",))
     titles = _tag_values(tags, ("title",))
     relative = path.relative_to(root)
-    album_directory = relative.parent
     duration_raw = getattr(getattr(audio, "info", None), "length", None)
     duration = float(duration_raw) if isinstance(duration_raw, (float, int)) else None
     return Song(
@@ -75,9 +90,13 @@ def read_song(path: Path, root: Path) -> Song:
         artist=tuple(artists),
         album_artists=tuple(album_artists),
         genres=tuple(genres),
-        year=parse_year(years),
+        year=parse_year(
+            years,
+            min_reasonable_year=min_reasonable_year,
+            max_reasonable_year_offset=max_reasonable_year_offset,
+        ),
         album=albums[0] if albums else path.parent.name,
-        album_directory=album_directory,
+        album_directory=relative.parent,
         size_bytes=path.stat().st_size,
         title=titles[0] if titles else None,
         duration_seconds=duration,

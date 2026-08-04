@@ -105,6 +105,7 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
 - `--surprise` / `--no-surprise`: activa o desactiva explícitamente el modo sorpresa. La opción CLI
   prevalece sobre `surprise_mode` de `config.ini`.
+- `--config RUTA`: usa expresamente ese archivo INI.
 - `--rescan`: descarta la caché y relee todos los metadatos.
 - `--verbose`: informa sobre caché, lectura y operaciones. Puede revelar rutas y detalles; no se debe
   usar cuando se necesita una sorpresa estricta.
@@ -140,7 +141,7 @@ ofrece `[a]ceptar`, `[r]ehacer`, `[v]er completa` y `[c]ancelar`. Rehacer conser
 Con `--seed`, la selección es reproducible y la interfaz no finge que puede rehacerla al azar: ofrece
 volver a filtros o cancelar. La selección aceptada es exactamente la confirmada y escrita.
 
-Las preferencias viven en `config.ini`:
+Las preferencias de preview y copia viven en el mismo `config.ini` que el resto de la configuración:
 
 ```ini
 [playlist_builder]
@@ -149,9 +150,9 @@ preview_entries = 5
 copy_structure = flat
 ```
 
-Se busca primero `config.ini` en el directorio de trabajo y, al usar los launchers incluidos, se usa
-como respaldo el archivo situado junto al proyecto. Así una configuración local explícita puede
-prevalecer sin depender del directorio desde el que se invocó el script.
+En un checkout se usa el `config.ini` de la raíz del proyecto. Tras instalar, la plantilla incluida
+en el paquete se copia una sola vez a la ubicación de configuración del usuario de Windows, macOS o
+Linux. `--config RUTA` permite seleccionar otro archivo de forma explícita.
 
 En modo sorpresa se omiten preview, composición y conteos de selección: se pide directamente el
 nombre y solo se presenta un resumen de filtros, límites, destino y el aviso de privacidad. No hay

@@ -61,18 +61,20 @@ python -m pip install -e ".[dev]"
 
 ## Configurar la discoteca
 
-Edite el `config.ini` del proyecto (o el indicado mediante `--config`). Además de la raíz musical y
-los valores predeterminados, `retry_error_after_days` controla cuándo se vuelven a leer los archivos
+Edite el `config.ini` del proyecto (o el indicado mediante `--config`). Cada opción está explicada
+directamente en el archivo. `retry_error_after_days` controla cuándo se vuelven a leer los archivos
 cuyos metadatos fallaron. Un cambio de tamaño/fecha o `--rescan` siempre fuerza el reintento:
 
 ```ini
 [playlist_builder]
 music_root = /Users/usuario/Música/MiDiscoteca
-profiles_file = filter_profiles.json
 retry_error_after_days = 7
 default_max_artist = 0
 deduplicate = false
 ```
+
+Los formatos admitidos son siempre MP3, FLAC, M4A/MP4, OGG, Opus y APE. Los perfiles se guardan
+siempre en `filter_profiles.json`, junto al `config.ini` utilizado.
 
 ## Ejecución
 
@@ -87,7 +89,6 @@ python crear_playlist.py --deduplicate
 python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
-python crear_playlist.py --copy "/media/USB" --copy-structure tree
 python crear_playlist.py --size 8000 --seed 12345
 python crear_playlist.py --from-playlist "Favoritas.m3u8" --size 1000 --seed 12345
 python crear_playlist.py --from-playlist "Viaje.m3u" --exclude-playlist "Ya escuchadas.m3u"
@@ -117,11 +118,8 @@ opcional con `chmod +x crear-playlist.sh`.
   contenido. La CLI prevalece sobre `deduplicate` en `config.ini` y la opción está desactivada por
   defecto. Solo se calculan hashes SHA-256 entre archivos del mismo tamaño; los fallos de lectura
   conservan la canción como candidata y nunca se modifican, eliminan, enlazan ni renombran originales.
-- `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
-  planos `índice - título (artista).ext`.
-- `--copy-structure flat|tree`: el valor `flat` produce, por ejemplo,
-  `Music/1 - Clefs De La Prison (The Hoffpauir Family).mp3`; `tree` conserva bajo `Music/` el árbol
-  relativo original. La opción CLI prevalece sobre `copy_structure` de `config.ini`.
+- `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Las copias usan siempre
+  nombres planos `índice - título (artista).ext` en el orden final de la playlist.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
   `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
@@ -169,19 +167,18 @@ Los años son opcionales e inclusivos. Si se introduce un único año `Y`, se us
 solapa con él.
 
 Después de fijar los filtros, la aplicación calcula una única selección y muestra su preview antes de
-pedir el nombre. La preview abreviada enseña las primeras y últimas cinco entradas (configurables), y
-ofrece `[a]ceptar`, `[r]ehacer`, `[v]er completa` y `[c]ancelar`. Rehacer conserva filtros y límites.
+pedir el nombre. La preview abreviada enseña el número de entradas de cada extremo indicado por
+`preview_entries`; con el valor 5 muestra las primeras cinco y las últimas cinco. Ofrece
+`[a]ceptar`, `[r]ehacer`, `[v]er completa` y `[c]ancelar`. Rehacer conserva filtros y límites.
 Con `--seed`, la selección es reproducible y la interfaz no finge que puede rehacerla al azar: ofrece
 volver a filtros o cancelar. La selección aceptada es exactamente la confirmada y escrita.
 
-Las preferencias de preview, copia y deduplicación viven en el mismo `config.ini` que el resto de la
-configuración:
+Las preferencias editables viven en el mismo `config.ini` que el resto de la configuración:
 
 ```ini
 [playlist_builder]
 surprise_mode = false
 preview_entries = 5
-copy_structure = flat
 retry_error_after_days = 7
 default_max_artist = 0
 deduplicate = false
@@ -193,12 +190,10 @@ Linux. `--config RUTA` permite seleccionar otro archivo de forma explícita.
 
 ## Perfiles de filtros
 
-`profiles_file` puede ser una ruta absoluta o relativa. Una ruta relativa se resuelve desde la
-carpeta del `config.ini`, nunca desde el directorio de trabajo; si se omite en un INI antiguo se usa
-`filter_profiles.json` junto al INI. El JSON UTF-8 está versionado y solo guarda selecciones
-legibles, años, tamaño y cuotas: no contiene rutas musicales ni estado transitorio de la UI. Se
-publica con un temporal y reemplazo atómico. Un JSON corrupto, una versión desconocida o un campo
-inválido produce un error claro sin modificarlo.
+Los perfiles se guardan siempre en `filter_profiles.json`, junto al `config.ini` seleccionado. El JSON
+UTF-8 está versionado y solo guarda selecciones legibles, años, tamaño y cuotas: no contiene rutas
+musicales ni estado transitorio de la UI. Se publica con un temporal y reemplazo atómico. Un JSON
+corrupto, una versión desconocida o un campo inválido produce un error claro sin modificarlo.
 
 La precedencia es **CLI explícita > perfil > INI** para tamaño y cuotas. Los filtros proceden del
 perfil y siguen siendo editables. La comparación normaliza mayúsculas, acentos, Unicode y espacios,
@@ -215,11 +210,12 @@ python crear_playlist.py --list-profiles
 python crear_playlist.py --profile "Viaje 2026" --save-profile "Viaje 2026" --force
 ```
 
-En modo sorpresa se omiten preview, composición y conteos de selección: se pide directamente el
-nombre y solo se presenta un resumen de filtros, límites, destino y el aviso de privacidad. No hay
-acción de rehacer. Con `--copy`, incluso si `copy_structure = tree`, la protección tiene prioridad y
-se usan rutas planas `Music/1 - Nombre playlist.ext`, conservando Unicode, espacios y la extensión.
-Las colisiones reciben el sufijo incremental habitual. El M3U mantiene `#EXTINF` por compatibilidad:
+En modo sorpresa no se muestran los recuentos iniciales del catálogo, la preview, la composición ni
+los conteos de candidatas y resultado antes de confirmar. Los filtros, años, límites y destino siguen
+visibles porque son las decisiones introducidas por el usuario. No hay acción de rehacer: después de
+calcular la selección se pide directamente el nombre. Con `--copy`, los archivos usan nombres planos
+`Music/1 - Nombre playlist.ext`, sin título ni artista. Al finalizar se sigue mostrando cuántas
+canciones se crearon y su tamaño total. El M3U mantiene `#EXTINF` por compatibilidad:
 **abrir el archivo M3U sí revela títulos y artistas**.
 
 ## Selección equilibrada
@@ -284,7 +280,7 @@ reales con `Artist`/`AlbumArtist`, géneros separados por comas y nombres Unicod
 - **No puede escribir el M3U o copiar:** compruebe permisos sobre `MUSIC_ROOT` o el destino. La
   aplicación muestra la ruta problemática y no publica un M3U incompleto.
 - **La reproducción desde otra máquina no encuentra archivos:** una playlist sin `--copy` contiene
-  rutas relativas a la discoteca original. Use `--copy` para crear un árbol autocontenido.
+  rutas relativas a la discoteca original. Use `--copy` para crear un conjunto autocontenido.
 
 ## Estructura
 

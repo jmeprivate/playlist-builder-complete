@@ -82,10 +82,7 @@ def copy_and_write_playlist(
     songs: list[Song],
     *,
     surprise: bool = False,
-    copy_structure: str = "flat",
 ) -> CopyResult:
-    if copy_structure not in {"flat", "tree"}:
-        raise ValueError("copy_structure debe ser 'flat' o 'tree'")
     destination = destination.expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     if not os.access(destination, os.W_OK):
@@ -102,8 +99,6 @@ def copy_and_write_playlist(
         for index, song in enumerate(songs, 1):
             if surprise:
                 relative = Path(f"{index} - {base_name}{song.path.suffix}")
-            elif copy_structure == "tree":
-                relative = song.relative_path
             else:
                 relative = Path(_normal_flat_name(index, song))
             final_target, reuse = _collision_free_target(

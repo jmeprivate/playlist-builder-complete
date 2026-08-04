@@ -9,26 +9,11 @@ from playlist_builder.models import Song
 
 
 def test_safe_component_only_replaces_characters_illegal_on_target_platform() -> None:
-    value = "Tema: directo? * | \u00e7 🎵"
+    value = "Tema: directo? * | ç 🎵"
     assert copier._safe_component(value, platform="posix") == value
-    assert copier._safe_component(value, platform="nt") == "Tema_ directo_ _ _ \u00e7 🎵"
+    assert copier._safe_component(value, platform="nt") == "Tema_ directo_ _ _ ç 🎵"
     assert copier._safe_component("Final. ", platform="posix") == "Final. "
     assert copier._safe_component("Final. ", platform="nt") == "Final"
-
-
-def test_copy_preserves_tree_and_handles_collision(
-    tmp_path: Path, song_factory: Callable[..., Song]
-) -> None:
-    song = song_factory(name="same.mp3", album_directory="Artist/Album", size_bytes=5)
-    destination = tmp_path / "export"
-    conflict = destination / "Music" / song.relative_path
-    conflict.parent.mkdir(parents=True)
-    conflict.write_bytes(b"other content")
-    result = copy_and_write_playlist(destination, "Viaje.m3u", [song], copy_structure="tree")
-    copied = result.copied_paths[song.path]
-    assert copied.name == "same (2).mp3"
-    assert copied.read_bytes() == song.path.read_bytes()
-    assert "Music/Artist/Album/same (2).mp3" in result.playlist_path.read_text(encoding="utf-8")
 
 
 def test_partial_copy_failure_publishes_nothing(
@@ -88,9 +73,7 @@ def test_surprise_copy_uses_playlist_name_unicode_and_final_collision_paths(
     conflict = destination / "Music" / "1 - Viaje agosto 🎵.mp3"
     conflict.parent.mkdir(parents=True)
     conflict.write_bytes(b"different")
-    result = copy_and_write_playlist(
-        destination, "Viaje agosto 🎵.m3u", songs, surprise=True, copy_structure="tree"
-    )
+    result = copy_and_write_playlist(destination, "Viaje agosto 🎵.m3u", songs, surprise=True)
     assert result.copied_paths[songs[0].path].name == "1 - Viaje agosto 🎵 (2).mp3"
     assert result.copied_paths[songs[1].path].name == "2 - Viaje agosto 🎵.flac"
     content = result.playlist_path.read_text(encoding="utf-8")

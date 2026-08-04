@@ -21,10 +21,8 @@ default_max_artist = 0
 cache_filename = .cache.json
 min_reasonable_year = 1000
 max_reasonable_year_offset = 1
-audio_extensions = .mp3, .flac
 surprise_mode = false
 preview_entries = 5
-copy_structure = flat
 """,
         encoding="utf-8",
     )

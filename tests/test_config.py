@@ -105,9 +105,7 @@ def test_invalid_values_identify_file_section_and_key(
         ("profiles_file", "other.json"),
     ],
 )
-def test_fixed_behaviors_cannot_be_configured(
-    tmp_path: Path, key: str, value: str
-) -> None:
+def test_fixed_behaviors_cannot_be_configured(tmp_path: Path, key: str, value: str) -> None:
     path = write_config(tmp_path / "unsupported.ini", **{key: value})
     with pytest.raises(ConfigError, match=rf"{key}: clave desconocida"):
         load_config(path)

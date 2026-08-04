@@ -22,6 +22,7 @@ DEFAULT_RETRY_ERROR_AFTER_DAYS = 7.0
 DEFAULT_MAX_ARTIST = 0
 CACHE_FILENAME = ".playlist_catalog.json"
 CONFIG_FILENAME = "config.ini"
+PROFILES_FILENAME = "filter_profiles.json"
 MIN_REASONABLE_YEAR = 1000
 MAX_REASONABLE_YEAR_OFFSET = 1
 AUDIO_EXTENSIONS = frozenset({".mp3", ".flac", ".m4a", ".mp4", ".ogg", ".opus", ".ape"})
@@ -46,6 +47,7 @@ class Settings:
     surprise_mode: bool
     preview_entries: int
     copy_structure: str
+    profiles_file: Path
     source: Path
 
 
@@ -150,8 +152,12 @@ def load_config(path: Path | str | None = None) -> Settings:
         "surprise_mode",
         "preview_entries",
         "copy_structure",
+        "profiles_file",
     }
-    missing = expected - set(section)
+    # profiles_file was added after the original INI format.  Keeping a safe
+    # default beside the selected INI lets existing user configurations update
+    # without becoming unusable.
+    missing = expected - {"profiles_file"} - set(section)
     if missing:
         key = sorted(missing)[0]
         raise _problem(source, key, "falta la clave obligatoria")
@@ -244,6 +250,13 @@ def load_config(path: Path | str | None = None) -> Settings:
     if copy_structure not in {"flat", "tree"}:
         raise _problem(source, "copy_structure", "debe ser 'flat' o 'tree'")
 
+    raw_profiles = section.get("profiles_file", PROFILES_FILENAME).strip()
+    if not raw_profiles:
+        raise _problem(source, "profiles_file", "la ruta no puede estar vacía")
+    profiles_file = Path(raw_profiles).expanduser()
+    if not profiles_file.is_absolute():
+        profiles_file = source.parent / profiles_file
+
     settings = Settings(
         music_root=root.resolve(),
         default_year_margin=positive_int("default_year_margin"),
@@ -258,6 +271,7 @@ def load_config(path: Path | str | None = None) -> Settings:
         surprise_mode=surprise_mode,
         preview_entries=positive_int("preview_entries"),
         copy_structure=copy_structure,
+        profiles_file=profiles_file.resolve(),
         source=source,
     )
     _publish_compatibility_defaults(settings)

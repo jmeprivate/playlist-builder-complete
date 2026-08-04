@@ -11,6 +11,14 @@ from .audit import format_audit
 from .config import ConfigError, Settings, default_config_path, load_config
 from .copier import CopyTransactionError, copy_and_write_playlist
 from .m3u import write_m3u_atomic
+from .profiles import (
+    FilterProfile,
+    ProfileError,
+    format_profile_summary,
+    load_profiles,
+    save_profiles_atomic,
+    validate_name,
+)
 from .progress import ConsoleScanProgress
 from .scanner import scan_library
 
@@ -102,6 +110,16 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
         metavar="RUTA",
         help=f"archivo INI de configuración (por defecto: {source})",
     )
+    parser.add_argument("--profile", metavar="NOMBRE", help="carga un perfil de filtros")
+    parser.add_argument(
+        "--save-profile", metavar="NOMBRE", help="guarda los filtros confirmados como perfil"
+    )
+    parser.add_argument(
+        "--list-profiles", action="store_true", help="lista los perfiles sin abrir la interfaz"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="reemplaza un perfil existente sin preguntar"
+    )
     return parser
 
 
@@ -144,6 +162,20 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
     # compatibility defaults when they import values from config.py.
     from . import ui
 
+    def save_confirmed(profile: FilterProfile) -> None:
+        if not args.save_profile:
+            return
+        profiles = load_profiles(settings.profiles_file)
+        if args.save_profile in profiles and not args.force:
+            from prompt_toolkit.shortcuts import confirm
+
+            if not confirm(f"El perfil {args.save_profile!r} ya existe. ¿Reemplazarlo?"):
+                print("Perfil no reemplazado; la playlist continuará.")
+                return
+        profiles[args.save_profile] = profile
+        save_profiles_atomic(settings.profiles_file, profiles)
+        print(f"Perfil guardado: {args.save_profile}")
+
     result = ui.run_interactive(
         songs,
         max_size_bytes=int(args.size * 1_000_000),
@@ -153,6 +185,8 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         seed=args.seed,
         surprise=surprise,
         preview_entries=settings.preview_entries,
+        initial_profile=getattr(args, "loaded_profile", None),
+        on_confirm=save_confirmed if args.save_profile else None,
     )
     if result is None:
         print("Operación cancelada; no se creó ningún archivo.")
@@ -206,6 +240,37 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser(settings).parse_args(raw_args)
     _configure_logging(args.verbose, args.debug)
     try:
+        if args.force and not args.save_profile:
+            raise ValueError("--force solo puede usarse junto con --save-profile")
+        if args.profile:
+            validate_name(args.profile)
+        if args.save_profile:
+            validate_name(args.save_profile)
+        profiles = load_profiles(settings.profiles_file)
+        if args.list_profiles:
+            for name, profile in sorted(profiles.items()):
+                print(format_profile_summary(name, profile))
+            if not profiles:
+                print("No hay perfiles guardados.")
+            return 0
+        if args.profile:
+            try:
+                loaded = profiles[args.profile]
+            except KeyError as exc:
+                raise ProfileError(f"no existe el perfil {args.profile!r}") from exc
+            args.loaded_profile = loaded
+
+            # Precedencia: una opción escrita en CLI gana al perfil; el perfil
+            # gana a los valores predeterminados procedentes del INI.
+            def explicit(option: str) -> bool:
+                return any(item == option or item.startswith(option + "=") for item in raw_args)
+
+            if not explicit("--size"):
+                args.size = loaded.size_mb
+            if not explicit("--max-album"):
+                args.max_album = loaded.max_album
+            if not explicit("--max-artist"):
+                args.max_artist = loaded.max_artist
         return _run(args, settings)
     except KeyboardInterrupt:
         print(
@@ -215,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     except EOFError:
         print("\nLa entrada del terminal se cerró; operación cancelada.", file=sys.stderr)
         return 1
-    except (OSError, ValueError, CopyTransactionError) as exc:
+    except (OSError, ValueError, ProfileError, CopyTransactionError) as exc:
         if args.debug:
             raise
         print(f"Error: {exc}", file=sys.stderr)

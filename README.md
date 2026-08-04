@@ -85,6 +85,7 @@ python crear_playlist.py --max-artist 3
 python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
+python crear_playlist.py --copy "/media/USB" --copy-structure tree
 python crear_playlist.py --size 8000 --seed 12345
 python crear_playlist.py --from-playlist "Favoritas.m3u8" --size 1000 --seed 12345
 python crear_playlist.py --from-playlist "Viaje.m3u" --exclude-playlist "Ya escuchadas.m3u"
@@ -111,7 +112,10 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--max-artist N`: máximo de canciones por artista de pista. `0`, un valor vacío o
   `sin límite` desactiva la cuota; está desactivada por defecto.
 - `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
-  planos `índice - título (artista).ext`; `copy_structure = tree` conserva el árbol original.
+  planos `índice - título (artista).ext`.
+- `--copy-structure flat|tree`: el valor `flat` produce, por ejemplo,
+  `Music/1 - Clefs De La Prison (The Hoffpauir Family).mp3`; `tree` conserva bajo `Music/` el árbol
+  relativo original. La opción CLI prevalece sobre `copy_structure` de `config.ini`.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
   `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
@@ -231,8 +235,9 @@ después se publican en `Music/`, y el M3U se publica el último. Ante un fallo 
 exclusivamente los archivos y directorios creados por esa operación; nunca se borran elementos
 preexistentes. Una copia idéntica se reutiliza y una colisión distinta recibe un sufijo incremental.
 
-Si el destino se encuentra dentro de la discoteca, se excluye por completo del escaneo de esa
-ejecución. Los archivos originales nunca se modifican.
+Si el destino se encuentra dentro de la discoteca, su carpeta `Music/` se excluye del escaneo de esa
+ejecución. La exportación incluye un marcador interno para que también se excluya automáticamente en
+ejecuciones posteriores. Los archivos originales nunca se modifican.
 
 ## Auditoría
 

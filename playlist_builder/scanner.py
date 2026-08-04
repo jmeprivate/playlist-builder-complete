@@ -20,6 +20,8 @@ from .metadata import read_song
 from .models import AuditIssue, AuditReport, Song
 from .progress import ProgressCallback, ScanProgress
 
+COPY_ROOT_MARKER = ".playlist-builder-copy-root"
+
 LOGGER = logging.getLogger(__name__)
 MetadataReader = Callable[[Path, Path], Song]
 
@@ -85,7 +87,11 @@ def _discover_audio_files(
                 )
                 LOGGER.warning("No se pudo resolver %s: %s", child, exc)
                 continue
-            if _is_inside(resolved, excluded) or _is_stale_copy_stage(relative):
+            if (
+                _is_inside(resolved, excluded)
+                or _is_stale_copy_stage(relative)
+                or (child / COPY_ROOT_MARKER).is_file()
+            ):
                 continue
             kept_directories.append(dirname)
         dirnames[:] = kept_directories

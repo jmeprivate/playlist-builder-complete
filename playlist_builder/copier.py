@@ -16,6 +16,9 @@ class CopyTransactionError(RuntimeError):
     pass
 
 
+COPY_ROOT_MARKER = ".playlist-builder-copy-root"
+
+
 def _collision_free_target(
     target: Path, source: Path, reserved: set[Path] | None = None
 ) -> tuple[Path, bool]:
@@ -83,6 +86,8 @@ def copy_and_write_playlist(
     surprise: bool = False,
     copy_structure: str = "flat",
 ) -> CopyResult:
+    if copy_structure not in {"flat", "tree"}:
+        raise ValueError("copy_structure debe ser 'flat' o 'tree'")
     destination = destination.expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     if not os.access(destination, os.W_OK):
@@ -90,6 +95,7 @@ def copy_and_write_playlist(
     stage = Path(tempfile.mkdtemp(prefix=".playlist-copy-", dir=destination))
     created: list[Path] = []
     created_directories: set[Path] = set()
+    created_marker: Path | None = None
     mapping: dict[Path, Path] = {}
     staged_items: list[tuple[Path, Path, bool]] = []
     try:
@@ -126,10 +132,21 @@ def copy_and_write_playlist(
             _create_parent_directories(target.parent, destination, created_directories)
             os.replace(staged, target)
             created.append(target)
+        # Permite que futuros escaneos reconozcan una exportación situada dentro
+        # de MUSIC_ROOT, incluso cuando esa ejecución no vuelva a usar --copy.
+        music_directory = destination / "Music"
+        _create_parent_directories(music_directory, destination, created_directories)
+        marker = music_directory / COPY_ROOT_MARKER
+        if not marker.exists():
+            marker.write_text("Playlist Builder copy destination\n", encoding="utf-8")
+            created_marker = marker
         playlist_path = destination / playlist_name
         write_m3u_atomic(playlist_path, songs, mapping)
         return CopyResult(playlist_path, mapping)
     except BaseException as exc:
+        if created_marker is not None:
+            with suppress(OSError):
+                created_marker.unlink(missing_ok=True)
         for path in reversed(created):
             with suppress(OSError):
                 path.unlink(missing_ok=True)

@@ -10,12 +10,10 @@ from .normalization import normalize_for_search
 def complete_year_range(
     year_min: int | None,
     year_max: int | None,
-    available_min: int | None = None,
-    available_max: int | None = None,
-    margin: int | None = None,
+    offset: int | None = None,
 ) -> tuple[int | None, int | None]:
-    del available_min, available_max
-    offset = config.MAX_REASONABLE_YEAR_OFFSET if margin is None else margin
+    if offset is None:
+        offset = config.MAX_REASONABLE_YEAR_OFFSET
     if offset < 0:
         raise ValueError("el margen de años no puede ser negativo")
     if year_min is not None and year_max is not None:

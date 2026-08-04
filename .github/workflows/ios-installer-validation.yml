@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/ios-installer
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read

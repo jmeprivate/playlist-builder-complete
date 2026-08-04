@@ -26,13 +26,20 @@ def complete_year_range(
 
 
 def song_matches(
-    song: Song, spec: FilterSpec, genre_aliases: GenreAliases = EMPTY_GENRE_ALIASES
+    song: Song,
+    spec: FilterSpec,
+    genre_aliases: GenreAliases = EMPTY_GENRE_ALIASES,
+    *,
+    included_genres: set[str] | None = None,
+    excluded_genres: set[str] | None = None,
 ) -> bool:
     artists = {normalize_for_search(value) for value in song.artist}
     album_artists = {normalize_for_search(value) for value in song.album_artists}
     genres = {genre_aliases.resolve(value) for value in song.genres}
-    included_genres = {genre_aliases.resolve(value) for value in spec.included_genres}
-    excluded_genres = {genre_aliases.resolve(value) for value in spec.excluded_genres}
+    if included_genres is None:
+        included_genres = {genre_aliases.resolve(value) for value in spec.included_genres}
+    if excluded_genres is None:
+        excluded_genres = {genre_aliases.resolve(value) for value in spec.excluded_genres}
     if (
         artists & spec.excluded_artists
         or album_artists & spec.excluded_album_artists
@@ -58,4 +65,16 @@ def song_matches(
 def filter_songs(
     songs: list[Song], spec: FilterSpec, genre_aliases: GenreAliases = EMPTY_GENRE_ALIASES
 ) -> list[Song]:
-    return [song for song in songs if song_matches(song, spec, genre_aliases)]
+    included_genres = {genre_aliases.resolve(value) for value in spec.included_genres}
+    excluded_genres = {genre_aliases.resolve(value) for value in spec.excluded_genres}
+    return [
+        song
+        for song in songs
+        if song_matches(
+            song,
+            spec,
+            genre_aliases,
+            included_genres=included_genres,
+            excluded_genres=excluded_genres,
+        )
+    ]

@@ -458,16 +458,16 @@ def run_interactive(
         state.year_min_input = initial_profile.year_min
         state.year_max_input = initial_profile.year_max
         missing: list[str] = []
-        for label, filter_state, available in (
-            ("artista de pista", state.artists, artists),
-            ("artista de álbum", state.album_artists, album_artists),
-            ("género", state.genres, genres),
+        for label, filter_state, available, resolve in (
+            ("artista de pista", state.artists, artists, normalize_for_search),
+            ("artista de álbum", state.album_artists, album_artists, normalize_for_search),
+            ("género", state.genres, genres, genre_aliases.resolve),
         ):
-            known = {normalize_for_search(item) for item in available}
+            known = {resolve(item) for item in available}
             missing.extend(
                 f"{label}: {item}"
                 for item in filter_state.included + filter_state.excluded
-                if normalize_for_search(item) not in known
+                if resolve(item) not in known
             )
         if missing:
             notice = "El perfil conserva selecciones sin coincidencia actual: " + "; ".join(missing)

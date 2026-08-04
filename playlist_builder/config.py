@@ -165,8 +165,8 @@ def load_config(path: Path | str | None = None) -> Settings:
         raise ConfigError(f"No se encontró el archivo de configuración: {source}") from exc
     except configparser.ParsingError as exc:
         raise ConfigError(
-            f"No se pudo leer la configuración {source}: formato INI no válido; "
-            f"compruebe que no haya una clave canónica vacía ({exc})"
+            f"No se pudo leer la configuración {source}: formato INI no válido "
+            f"(revise el detalle para localizar la sección y la línea): {exc}"
         ) from exc
     except (OSError, UnicodeError, configparser.Error) as exc:
         raise ConfigError(f"No se pudo leer la configuración {source}: {exc}") from exc
@@ -191,6 +191,12 @@ def load_config(path: Path | str | None = None) -> Settings:
         if not canonical_normalized:
             raise ConfigError(
                 f"{source} [{GENRE_ALIASES_SECTION}]: la clave canónica no puede estar vacía"
+            )
+        if canonical_normalized in canonical_displays:
+            previous_display = canonical_displays[canonical_normalized]
+            raise ConfigError(
+                f"{source} [{GENRE_ALIASES_SECTION}] {canonical}: la clave canónica coincide con "
+                f"{previous_display!r} tras normalizar; declárela una sola vez"
             )
         aliases = raw_value.split(";")
         if any(not alias.strip() for alias in aliases):

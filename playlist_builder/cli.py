@@ -10,6 +10,7 @@ from . import config as config_module
 from .audit import format_audit
 from .config import ConfigError, Settings, default_config_path, load_config
 from .copier import CopyTransactionError, copy_and_write_playlist
+from .deduplication import configure_deduplication
 from .m3u import match_playlist_songs, write_m3u_atomic
 from .profiles import (
     FilterProfile,
@@ -54,6 +55,9 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     size = settings.default_size_mb if settings else config_module.DEFAULT_SIZE_MB
     max_album = settings.default_max_album if settings else config_module.DEFAULT_MAX_ALBUM
     max_artist = settings.default_max_artist if settings else config_module.DEFAULT_MAX_ARTIST
+    deduplicate_default = (
+        settings.deduplicate if settings else config_module.DEFAULT_DEDUPLICATE
+    )
     source = settings.source if settings else default_config_path()
     parser = argparse.ArgumentParser(
         description="Genera playlists M3U equilibradas desde una discoteca local.",
@@ -85,6 +89,16 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--copy", type=Path, metavar="RUTA", help="copia la selección al destino")
     parser.add_argument(
+        "--copy-structure",
+        choices=("flat", "tree"),
+        default=settings.copy_structure if settings else "flat",
+        help=(
+            "estructura de las copias: flat usa nombres numerados en Music/ y tree "
+            "conserva las carpetas originales (configuración: "
+            f"{settings.copy_structure if settings else 'flat'})"
+        ),
+    )
+    parser.add_argument(
         "--audit", choices=("simple", "full"), help="muestra auditoría del catálogo"
     )
     parser.add_argument(
@@ -104,7 +118,7 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
         action="store_false",
         help="desactiva la deduplicación configurada",
     )
-    parser.set_defaults(deduplicate=settings.deduplicate if settings else False)
+    parser.set_defaults(deduplicate=deduplicate_default)
     parser.add_argument(
         "--from-playlist",
         type=Path,
@@ -243,19 +257,23 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         save_profiles_atomic(settings.profiles_file, profiles)
         print(f"Perfil guardado: {args.save_profile}")
 
-    result = ui.run_interactive(
-        songs,
-        max_size_bytes=int(args.size * 1_000_000),
-        max_per_album=args.max_album,
-        max_per_artist=args.max_artist,
-        destination=destination,
-        seed=args.seed,
-        surprise=surprise,
-        preview_entries=settings.preview_entries,
-        initial_profile=getattr(args, "loaded_profile", None),
-        on_confirm=save_confirmed if args.save_profile else None,
-        deduplicate=args.deduplicate,
-    )
+    configure_deduplication(args.deduplicate)
+    try:
+        result = ui.run_interactive(
+            songs,
+            max_size_bytes=int(args.size * 1_000_000),
+            max_per_album=args.max_album,
+            max_per_artist=args.max_artist,
+            destination=destination,
+            seed=args.seed,
+            surprise=surprise,
+            preview_entries=settings.preview_entries,
+            initial_profile=getattr(args, "loaded_profile", None),
+            on_confirm=save_confirmed if args.save_profile else None,
+            genre_aliases=settings.genre_aliases,
+        )
+    finally:
+        configure_deduplication(False)
     if result is None:
         print("Operación cancelada; no se creó ningún archivo.")
         return 1
@@ -273,7 +291,7 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
             playlist_name,
             selected,
             surprise=surprise,
-            copy_structure=settings.copy_structure,
+            copy_structure=args.copy_structure,
         ).playlist_path
     else:
         final_path = root / playlist_name
@@ -310,6 +328,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.force and not args.save_profile:
             raise ValueError("--force solo puede usarse junto con --save-profile")
+        copy_structure_given = any(
+            item == "--copy-structure" or item.startswith("--copy-structure=")
+            for item in raw_args
+        )
+        if copy_structure_given and not args.copy:
+            raise ValueError("--copy-structure solo puede usarse junto con --copy")
         if args.profile:
             validate_name(args.profile)
         if args.save_profile:

@@ -55,6 +55,18 @@ def test_surprise_flags_are_explicit_and_mutually_exclusive() -> None:
         build_parser().parse_args(["--surprise", "--no-surprise"])
 
 
+def test_copy_structure_cli_defaults_to_config_and_accepts_override(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path / "config.ini")
+    text = config_path.read_text(encoding="utf-8").replace(
+        "copy_structure = flat", "copy_structure = tree"
+    )
+    config_path.write_text(text, encoding="utf-8")
+    settings = load_config(config_path)
+
+    assert build_parser(settings).parse_args([]).copy_structure == "tree"
+    assert build_parser(settings).parse_args(["--copy-structure", "flat"]).copy_structure == "flat"
+
+
 def test_surprise_cli_value_precedes_config() -> None:
     assert resolve_surprise(None, True) is True
     assert resolve_surprise(None, False) is False

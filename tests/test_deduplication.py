@@ -70,3 +70,4 @@ def test_hash_read_failure_is_logged_and_file_is_retained(
 def test_deduplication_is_disabled_by_default() -> None:
     assert build_parser().parse_args([]).deduplicate is False
     assert build_parser().parse_args(["--deduplicate"]).deduplicate is True
+    assert build_parser().parse_args(["--no-deduplicate"]).deduplicate is False

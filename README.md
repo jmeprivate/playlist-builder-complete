@@ -71,7 +71,6 @@ music_root = /Users/usuario/Música/MiDiscoteca
 profiles_file = filter_profiles.json
 retry_error_after_days = 7
 default_max_artist = 0
-deduplicate = false
 ```
 
 ## Ejecución
@@ -83,10 +82,10 @@ python crear_playlist.py
 python crear_playlist.py --size 4000
 python crear_playlist.py --size 4000 --max-album 1
 python crear_playlist.py --max-artist 3
-python crear_playlist.py --deduplicate --seed 12345
 python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
+python crear_playlist.py --copy "/media/USB" --copy-structure tree
 python crear_playlist.py --size 8000 --seed 12345
 python crear_playlist.py --from-playlist "Favoritas.m3u8" --size 1000 --seed 12345
 python crear_playlist.py --from-playlist "Viaje.m3u" --exclude-playlist "Ya escuchadas.m3u"
@@ -113,17 +112,14 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--max-artist N`: máximo de canciones por artista de pista. `0`, un valor vacío o
   `sin límite` desactiva la cuota; está desactivada por defecto.
 - `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
-  planos `índice - título (artista).ext`; `copy_structure = tree` conserva el árbol original.
+  planos `índice - título (artista).ext`.
+- `--copy-structure flat|tree`: el valor `flat` produce, por ejemplo,
+  `Music/1 - Clefs De La Prison (The Hoffpauir Family).mp3`; `tree` conserva bajo `Music/` el árbol
+  relativo original. La opción CLI prevalece sobre `copy_structure` de `config.ini`.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
   `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
-- `--deduplicate`: tras aplicar playlists y filtros normales, agrupa las candidatas por tamaño y
-  calcula SHA-256, por bloques, únicamente en grupos de al menos dos. Por cada contenido idéntico
-  conserva la ruta relativa menor en orden estable (sin depender del recorrido del sistema). Está
-  desactivado por defecto (`deduplicate = false`); `--no-deduplicate` prevalece sobre el INI. Un
-  archivo que no pueda leerse se registra y se conserva como candidato, pues no se puede afirmar
-  que sea duplicado. `--verbose` detalla candidatas, hashes, grupos y fallos.
 - `--from-playlist RUTA`: limita las candidatas a la unión de una o varias playlists M3U/M3U8;
   puede repetirse. A continuación se aplican las exclusiones y los filtros interactivos habituales.
 - `--exclude-playlist RUTA`: elimina candidatas citadas por una playlist M3U/M3U8; puede repetirse.
@@ -162,8 +158,9 @@ siempre. Una canción sin tag
 puede participar si no hay inclusión positiva para ese tag; sin año queda fuera solo cuando existe
 un filtro temporal.
 
-Los años son opcionales e inclusivos. Si se rellena solo un extremo, el otro se calcula con
-`DEFAULT_YEAR_MARGIN` y se limita al rango disponible.
+Los años son opcionales e inclusivos. Si se introduce un único año `Y`, se usa el intervalo
+`Y - default_year_margin` a `Y + default_year_margin`, limitado al rango disponible cuando se
+solapa con él.
 
 Después de fijar los filtros, la aplicación calcula una única selección y muestra su preview antes de
 pedir el nombre. La preview abreviada enseña las primeras y últimas cinco entradas (configurables), y
@@ -219,12 +216,6 @@ Las colisiones reciben el sufijo incremental habitual. El M3U mantiene `#EXTINF`
 
 ## Selección equilibrada
 
-La deduplicación opcional ocurre justo antes de esta selección y no modifica, borra, enlaza ni copia
-los originales. Su coste es `O(n + n log n + B)`: `n` son las candidatas filtradas y `B` los bytes
-leídos exclusivamente de los grupos que colisionan en tamaño; con la opción desactivada el coste y
-las lecturas de contenido son cero. Los hashes no se persisten, evitando ampliar el esquema de la
-caché de metadatos; por ello nunca se reutiliza un hash obsoleto.
-
 Las candidatas se agrupan por carpeta de álbum. Las canciones y álbumes se barajan y la selección
 avanza por rondas, como máximo una canción por álbum y ronda. Se respeta `--max-album`; si una pista
 no cabe se siguen probando pistas más pequeñas. Esto evita depender del orden del sistema de archivos
@@ -244,8 +235,12 @@ después se publican en `Music/`, y el M3U se publica el último. Ante un fallo 
 exclusivamente los archivos y directorios creados por esa operación; nunca se borran elementos
 preexistentes. Una copia idéntica se reutiliza y una colisión distinta recibe un sufijo incremental.
 
-Si el destino se encuentra dentro de la discoteca, se excluye por completo del escaneo de esa
-ejecución. Los archivos originales nunca se modifican.
+Si el destino se encuentra dentro de la discoteca, su carpeta `Music/` se excluye del escaneo de esa
+ejecución. La exportación incluye el marcador interno `Music/.playlist-builder-copy-root` para que
+también se excluya automáticamente en ejecuciones posteriores; con `--verbose` se informa de cada
+carpeta omitida por este motivo. Para volver a incluir esa carpeta en el escaneo (por ejemplo, si se
+reutiliza para música real) basta con eliminar ese archivo oculto. Los archivos originales nunca se
+modifican.
 
 ## Auditoría
 

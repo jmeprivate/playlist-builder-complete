@@ -127,6 +127,37 @@ def test_scan_excludes_copy_tree_and_continues_after_mutagen_error(tmp_path: Pat
     assert report.issues[0].relative_path == original.relative_to(root)
 
 
+def test_scan_excludes_marked_copy_destination_on_later_runs(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    original = root / "Artist" / "original.mp3"
+    copied_music = root / "Export" / "Music"
+    copied = copied_music / "1 - Copia (Artist).mp3"
+    for path in (original, copied):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"audio")
+    (copied_music / ".playlist-builder-copy-root").write_text("marker", encoding="utf-8")
+
+    seen: list[Path] = []
+
+    def reader(path: Path, music_root: Path) -> Song:
+        seen.append(path)
+        return Song(
+            path=path,
+            relative_path=path.relative_to(music_root),
+            artist=("Artist",),
+            genres=(),
+            year=None,
+            album="",
+            album_directory=Path("Artist"),
+            size_bytes=path.stat().st_size,
+        )
+
+    songs, report = scan_library(root, metadata_reader=reader)
+    assert [song.path for song in songs] == [original]
+    assert seen == [original]
+    assert report.total_audio_files == 1
+
+
 def test_cache_invalidates_v1_and_deserializes_legacy_song_without_album_artists(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:

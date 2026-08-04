@@ -3,12 +3,27 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections import defaultdict
+from collections.abc import Hashable
 from pathlib import Path
 
 from .models import Song
 
 LOGGER = logging.getLogger(__name__)
 HASH_BLOCK_SIZE = 1024 * 1024
+
+_enabled = False
+_cache: dict[tuple[Hashable, tuple[tuple[str, int], ...]], list[Song]] = {}
+
+
+def configure_deduplication(enabled: bool) -> None:
+    """Enable or disable deduplication for one interactive run.
+
+    Clearing the cache at each transition prevents results from leaking between
+    separate CLI invocations or test cases in the same process.
+    """
+    global _enabled
+    _enabled = enabled
+    _cache.clear()
 
 
 def _stable_path_key(song: Song) -> tuple[str, str]:
@@ -27,14 +42,9 @@ def _sha256(path: Path) -> str:
 def deduplicate_songs(songs: list[Song]) -> list[Song]:
     """Remove content duplicates, keeping the most stable relative path.
 
-    Only size-collision groups are read.  A file that cannot be hashed remains a
-    candidate because its content identity could not be established.
-
-    Grouping relies on ``song.size_bytes`` from the scan/cache rather than a fresh
-    ``stat()``.  If a file changed on disk since the last scan without invalidating
-    its cache entry, two files with identical current content may land in different
-    size buckets and never be compared.  This can only miss a deduplication (files
-    are never removed unless their hashes match), so it is a benign inconsistency.
+    Only size-collision groups are read. A file that cannot be hashed remains a
+    candidate because its content identity could not be established. No source
+    file is modified, removed or linked.
     """
     by_size: dict[int, list[tuple[int, Song]]] = defaultdict(list)
     for index, song in enumerate(songs):
@@ -62,7 +72,6 @@ def deduplicate_songs(songs: list[Song]) -> list[Song]:
         for digest, identical in by_digest.items():
             if len(identical) < 2:
                 continue
-            # ``identical`` is already in stable order (built from a sorted scan).
             representative = identical[0][1]
             removed.update(index for index, _ in identical[1:])
             LOGGER.info(
@@ -73,3 +82,16 @@ def deduplicate_songs(songs: list[Song]) -> list[Song]:
             )
 
     return [song for index, song in enumerate(songs) if index not in removed]
+
+
+def maybe_deduplicate_songs(songs: list[Song], cache_key: Hashable) -> list[Song]:
+    """Deduplicate once for each stable filtered candidate set."""
+    if not _enabled:
+        return songs
+    fingerprint = tuple((song.relative_path.as_posix(), song.size_bytes) for song in songs)
+    key = (cache_key, fingerprint)
+    cached = _cache.get(key)
+    if cached is None:
+        cached = deduplicate_songs(songs)
+        _cache[key] = cached
+    return cached

@@ -87,16 +87,6 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--copy", type=Path, metavar="RUTA", help="copia la selección al destino")
     parser.add_argument(
-        "--copy-structure",
-        choices=("flat", "tree"),
-        default=settings.copy_structure if settings else "flat",
-        help=(
-            "estructura de las copias: flat usa nombres numerados en Music/ y tree "
-            "conserva las carpetas originales (configuración: "
-            f"{settings.copy_structure if settings else 'flat'})"
-        ),
-    )
-    parser.add_argument(
         "--audit", choices=("simple", "full"), help="muestra auditoría del catálogo"
     )
     parser.add_argument(
@@ -135,13 +125,23 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     )
     surprise = parser.add_mutually_exclusive_group()
     surprise.add_argument(
-        "--surprise", dest="surprise", action="store_true", help="oculta la selección"
+        "--surprise",
+        dest="surprise",
+        action="store_true",
+        help="enmascara los nombres de las canciones hasta reproducirlas",
     )
     surprise.add_argument(
-        "--no-surprise", dest="surprise", action="store_false", help="muestra la preview"
+        "--no-surprise",
+        dest="surprise",
+        action="store_false",
+        help="muestra los nombres reales en la preview",
     )
     parser.set_defaults(surprise=None)
-    parser.add_argument("--rescan", action="store_true", help="ignora y reconstruye la caché")
+    parser.add_argument(
+        "--rescan",
+        action="store_true",
+        help="reconstruye la caché y reintenta los metadatos fallidos",
+    )
     parser.add_argument("--verbose", action="store_true", help="muestra información detallada")
     parser.add_argument(
         "--debug", action="store_true", help="activa logs de depuración y tracebacks"
@@ -218,8 +218,6 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         if not songs:
             raise ValueError("--from-playlist no contiene ninguna canción válida de la discoteca")
     if args.exclude_playlist:
-        # Se empareja contra el catálogo completo para que el recuento de
-        # "no escaneadas" no incluya canciones ya descartadas por --from-playlist.
         excluded_paths, playlist_report = match_playlist_songs(catalog, root, args.exclude_playlist)
         logging.getLogger(__name__).info(
             "Playlists de exclusión: %d coincidencias; %d entradas ignoradas "
@@ -237,8 +235,6 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
                 "--exclude-playlist excluyó todas las canciones candidatas de la discoteca"
             )
 
-    # Import after load_config(): ui.py and filters.py receive the selected
-    # compatibility defaults when they import values from config.py.
     from . import ui
 
     def save_confirmed(profile: FilterProfile) -> None:
@@ -265,7 +261,6 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
             destination=destination,
             seed=args.seed,
             surprise=surprise,
-            preview_entries=settings.preview_entries,
             initial_profile=getattr(args, "loaded_profile", None),
             on_confirm=save_confirmed if args.save_profile else None,
             genre_aliases=settings.genre_aliases,
@@ -289,11 +284,15 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
             playlist_name,
             selected,
             surprise=surprise,
-            copy_structure=args.copy_structure,
         ).playlist_path
     else:
         final_path = root / playlist_name
-        write_m3u_atomic(final_path, selected)
+        write_m3u_atomic(
+            final_path,
+            selected,
+            surprise=surprise,
+            playlist_name=playlist_name,
+        )
     print(
         f"Playlist creada: {final_path}\n{len(selected)} canciones · "
         f"{sum(song.size_bytes for song in selected) / 1_000_000:.2f} MB"
@@ -303,8 +302,6 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     raw_args = sys.argv[1:] if argv is None else argv
-
-    # Help must remain available even when the INI is missing or malformed.
     if "-h" in raw_args or "--help" in raw_args:
         build_parser().parse_args(raw_args)
         return 0
@@ -326,11 +323,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.force and not args.save_profile:
             raise ValueError("--force solo puede usarse junto con --save-profile")
-        copy_structure_given = any(
-            item == "--copy-structure" or item.startswith("--copy-structure=") for item in raw_args
-        )
-        if copy_structure_given and not args.copy:
-            raise ValueError("--copy-structure solo puede usarse junto con --copy")
         if args.profile:
             validate_name(args.profile)
         if args.save_profile:
@@ -353,8 +345,6 @@ def main(argv: list[str] | None = None) -> int:
                 raise ProfileError(f"no existe el perfil {args.profile!r}") from exc
             args.loaded_profile = loaded
 
-            # Precedencia: una opción escrita en CLI gana al perfil; el perfil
-            # gana a los valores predeterminados procedentes del INI.
             def explicit(option: str) -> bool:
                 return any(item == option or item.startswith(option + "=") for item in raw_args)
 

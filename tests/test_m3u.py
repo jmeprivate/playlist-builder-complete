@@ -29,6 +29,31 @@ def test_m3u_copy_override_is_relative(tmp_path: Path, song_factory: Callable[..
     assert str(song.path) not in content
 
 
+def test_surprise_extinf_names_are_identical_with_and_without_copy(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
+    songs = [
+        song_factory(name="secret-one.mp3", title="Secret one"),
+        song_factory(name="secret-two.flac", title="Secret two"),
+    ]
+    plain = render_m3u(songs, tmp_path, surprise=True, playlist_name="Viaje.m3u")
+    overrides = {
+        songs[0].path: tmp_path / "Music" / "1 - Viaje.mp3",
+        songs[1].path: tmp_path / "Music" / "2 - Viaje.flac",
+    }
+    copied = render_m3u(
+        songs,
+        tmp_path,
+        overrides,
+        surprise=True,
+        playlist_name="Viaje.m3u",
+    )
+    for content in (plain, copied):
+        assert "#EXTINF:123,1 - Viaje.mp3" in content
+        assert "#EXTINF:123,2 - Viaje.flac" in content
+        assert "Secret" not in content
+
+
 def test_extinf_controls_are_flattened_without_removing_format_characters(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:

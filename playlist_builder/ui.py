@@ -5,7 +5,6 @@ import random
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
 from html import escape as escape_html
 from pathlib import Path
 from typing import Literal
@@ -21,13 +20,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.shortcuts import clear, confirm, print_formatted_text
 
-from .config import (
-    EMPTY_GENRE_ALIASES,
-    MAX_REASONABLE_YEAR_OFFSET,
-    MIN_REASONABLE_YEAR,
-    GenreAliases,
-)
+from .config import EMPTY_GENRE_ALIASES, GenreAliases
 from .filters import complete_year_range, filter_songs
+from .m3u import surprise_display_name
 from .models import FilterSpec, Song
 from .normalization import deduplicate_display_values, normalize_for_search
 from .profiles import FilterProfile
@@ -99,7 +94,7 @@ class SubstringCompleter(Completer):
 
     def get_completions(
         self, document: Document, complete_event: CompleteEvent
-    ) -> Iterable[Completion]:  # pragma: no cover - prompt_toolkit drives this generator
+    ) -> Iterable[Completion]:
         text = document.text_before_cursor
         query = text[1:] if text[:1] in {"+", "-"} else text
         for option in self.matches(text):
@@ -328,7 +323,11 @@ def _format_mb(size: int) -> str:
 def format_song(song: Song) -> str:
     artist = ", ".join(song.artist) or "Artista desconocido"
     title = song.title or song.path.stem
-    details = [value for value in (song.album, str(song.year) if song.year else "") if value]
+    details = [
+        value
+        for value in (song.album, str(song.year) if song.year is not None else "")
+        if value
+    ]
     suffix = f" — {' · '.join(details)}" if details else ""
     return f"{artist} - {title}{suffix}"
 
@@ -338,26 +337,19 @@ def format_preview(
     *,
     max_size_bytes: int,
     max_per_album: int,
-    edge_entries: int,
-    full: bool = False,
+    playlist_name: str,
+    surprise: bool = False,
 ) -> str:
-    """Render a preview without changing selection or navigation state."""
     lines = [
         "\nPreview de la selección",
         f"{len(selected)} canciones · {_format_mb(sum(song.size_bytes for song in selected))}",
         f"Límites: {_format_mb(max_size_bytes)} · máximo {max_per_album} por álbum",
     ]
-    indexed = list(enumerate(selected, 1))
-    if not full and len(indexed) > edge_entries * 2:
-        visible = indexed[:edge_entries] + indexed[-edge_entries:]
-        omitted_at = edge_entries
-    else:
-        visible = indexed
-        omitted_at = -1
-    for position, (index, song) in enumerate(visible):
-        if position == omitted_at:
-            lines.append(f"… {len(indexed) - edge_entries * 2} canciones omitidas …")
-        lines.append(f"{index}. {format_song(song)}")
+    for index, song in enumerate(selected, 1):
+        if surprise:
+            lines.append(surprise_display_name(index, playlist_name, song))
+        else:
+            lines.append(f"{index}. {format_song(song)}")
     return "\n".join(lines)
 
 
@@ -369,7 +361,6 @@ def _different_selection(
     rng: random.Random,
     max_per_artist: int | None,
 ) -> SelectionResult:
-    """Retry a few unbiased shuffles when an alternative ordering exists."""
     result = SelectionResult(previous, 0)
     for _ in range(8):
         result = select_balanced_with_stats(
@@ -378,25 +369,6 @@ def _different_selection(
         if result.songs != previous or len(candidates) < 2:
             break
     return result
-
-
-def _validate_year(
-    year: int | None,
-    available_min: int | None,
-    available_max: int | None,
-    label: str,
-    *,
-    allow_unavailable: bool = False,
-) -> None:
-    if year is None:
-        return
-    maximum_reasonable = datetime.now().year + MAX_REASONABLE_YEAR_OFFSET
-    if not MIN_REASONABLE_YEAR <= year <= maximum_reasonable:
-        raise ValueError(f"{label} debe estar entre {MIN_REASONABLE_YEAR} y {maximum_reasonable}")
-    if not allow_unavailable and available_min is not None and year < available_min:
-        raise ValueError(f"{label} es menor que el mínimo disponible ({available_min})")
-    if not allow_unavailable and available_max is not None and year > available_max:
-        raise ValueError(f"{label} es mayor que el máximo disponible ({available_max})")
 
 
 def run_interactive(
@@ -408,7 +380,6 @@ def run_interactive(
     destination: Path,
     seed: int | None,
     surprise: bool = False,
-    preview_entries: int = 5,
     initial_profile: FilterProfile | None = None,
     on_confirm: Callable[[FilterProfile], None] | None = None,
     genre_aliases: GenreAliases = EMPTY_GENRE_ALIASES,
@@ -430,13 +401,15 @@ def run_interactive(
     available_max = max(years) if years else None
     year_text = f"{available_min}-{available_max}" if years else "sin años válidos"
     print_formatted_text(HTML("<b>¡Creemos una playlist!</b>"))
+    print(
+        f"\nEncontrados:\n- {len(artists)} artistas de pista\n"
+        f"- {len(album_artists)} artistas de álbum\n- {len(genres)} géneros\n"
+        f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
+    )
     if surprise:
-        print("\nModo sorpresa activo: el contenido permanecerá oculto hasta crear la playlist.\n")
-    else:
         print(
-            f"\nEncontrados:\n- {len(artists)} artistas de pista\n"
-            f"- {len(album_artists)} artistas de álbum\n- {len(genres)} géneros\n"
-            f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
+            "Modo sorpresa activo: los nombres se mostrarán enmascarados "
+            "hasta la reproducción.\n"
         )
     print(
         "Usa + para incluir, - para excluir, Tab para coincidencias, "
@@ -471,8 +444,6 @@ def run_interactive(
             )
         if missing:
             notice = "El perfil conserva selecciones sin coincidencia actual: " + "; ".join(missing)
-            # select_values clears the terminal, so attach the warning to every
-            # relevant first screen instead of printing a message that vanishes.
             state.artists.notice = notice
             state.album_artists.notice = notice
             state.genres.notice = notice
@@ -515,53 +486,33 @@ def run_interactive(
             result = select_values("Géneros", genres, state.genres)
             screen = 1 if result == BACK else 3
         elif screen == 3:
+            available_text = str(available_min) if available_min is not None else "—"
             result = _simple_prompt(
-                f"Desde el año (mín. {available_min or '—'}): ",
-                str(state.year_min_input or ""),
+                f"Desde el año (disponible desde {available_text}): ",
+                str(state.year_min_input) if state.year_min_input is not None else "",
             )
             if result == BACK:
                 screen = 2
                 continue
             try:
                 state.year_min_input = int(result) if result.strip() else None
-                _validate_year(
-                    state.year_min_input,
-                    available_min,
-                    available_max,
-                    "el año mínimo",
-                    allow_unavailable=(
-                        initial_profile is not None
-                        and state.year_min_input == initial_profile.year_min
-                    ),
-                )
                 screen = 4
-            except ValueError as exc:
-                print(f"Valor no válido: {exc}")
+            except ValueError:
+                print("Valor no válido: el año debe ser un número entero")
         elif screen == 4:
+            available_text = str(available_max) if available_max is not None else "—"
             result = _simple_prompt(
-                f"Hasta el año (máx. {available_max or '—'}): ",
-                str(state.year_max_input or ""),
+                f"Hasta el año (disponible hasta {available_text}): ",
+                str(state.year_max_input) if state.year_max_input is not None else "",
             )
             if result == BACK:
                 screen = 3
                 continue
             try:
                 state.year_max_input = int(result) if result.strip() else None
-                _validate_year(
-                    state.year_max_input,
-                    available_min,
-                    available_max,
-                    "el año máximo",
-                    allow_unavailable=(
-                        initial_profile is not None
-                        and state.year_max_input == initial_profile.year_max
-                    ),
-                )
                 state.year_min, state.year_max = complete_year_range(
                     state.year_min_input,
                     state.year_max_input,
-                    available_min,
-                    available_max,
                 )
                 state.selected = []
                 skipped_by_artist_quota = 0
@@ -590,57 +541,11 @@ def run_interactive(
                 if choice in {"f", BACK}:
                     screen = 4
                 continue
-            if surprise:
-                screen = 6
-                continue
-            print(
-                format_preview(
-                    state.selected,
-                    max_size_bytes=max_size_bytes,
-                    max_per_album=max_per_album,
-                    edge_entries=preview_entries,
-                )
-            )
-            choice = _normalize_choice(
-                _simple_prompt("[a]ceptar resultado / [r]ehacer / [v]er completa / [c]ancelar: ")
-            )
-            if choice == "a":
-                screen = 6
-            elif choice == "v":
-                print(
-                    format_preview(
-                        state.selected,
-                        max_size_bytes=max_size_bytes,
-                        max_per_album=max_per_album,
-                        edge_entries=preview_entries,
-                        full=True,
-                    )
-                )
-            elif choice == "r":
-                if seed is not None:
-                    print("La selección está fijada por --seed; no se cambiará silenciosamente.")
-                    action = _normalize_choice(_simple_prompt("[f]iltros / [c]ancelar: "))
-                    if action == "c":
-                        return None
-                    if action in {"f", BACK}:
-                        screen = 4
-                else:
-                    selection = _different_selection(
-                        candidates,
-                        state.selected,
-                        max_size_bytes,
-                        max_per_album,
-                        session_rng,
-                        max_per_artist,
-                    )
-                    state.selected = selection.songs
-                    skipped_by_artist_quota = selection.skipped_by_artist_quota
-            elif choice == "c":
-                return None
+            screen = 6
         elif screen == 6:
             result = _simple_prompt("¿Qué nombre le damos a la playlist? ", state.playlist_name)
             if result == BACK:
-                screen = 5
+                screen = 4
                 continue
             try:
                 requested = sanitize_playlist_name(result)
@@ -672,17 +577,27 @@ def run_interactive(
             print(f"Máximo por álbum: {max_per_album}")
             print(f"Máximo por artista de pista: {max_per_artist or 'sin límite'}")
             print(f"Destino: {destination}")
+            candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
+            selected_size = _format_mb(sum(song.size_bytes for song in state.selected))
+            print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
+            if max_per_artist is not None:
+                print(f"Candidatas omitidas por cuota de artista: {skipped_by_artist_quota}")
+            print(f"Canciones que entrarán: {len(state.selected)} ({selected_size})")
             if surprise:
-                print("Modo sorpresa activo: composición oculta")
-            else:
-                candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
-                selected_size = _format_mb(sum(song.size_bytes for song in state.selected))
-                print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
-                if max_per_artist is not None:
-                    print(f"Candidatas omitidas por cuota de artista: {skipped_by_artist_quota}")
-                print(f"Canciones que entrarán: {len(state.selected)} ({selected_size})")
+                print("Modo sorpresa activo: nombres enmascarados")
+            print(
+                format_preview(
+                    state.selected,
+                    max_size_bytes=max_size_bytes,
+                    max_per_album=max_per_album,
+                    playlist_name=state.playlist_name,
+                    surprise=surprise,
+                )
+            )
             choice = _normalize_choice(
-                _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ")
+                _simple_prompt(
+                    "[s] confirmar / [r]ehacer / [n] cambiar nombre / [f]iltros / [c] cancelar: "
+                )
             )
             if choice == "s":
                 if on_confirm is not None:
@@ -702,7 +617,23 @@ def run_interactive(
                         )
                     )
                 return state.playlist_name, state.selected
-            if choice == "v" or choice == BACK:
+            if choice == "r":
+                if seed is not None:
+                    print("La selección está fijada por --seed y no puede rehacerse.")
+                else:
+                    selection = _different_selection(
+                        candidates,
+                        state.selected,
+                        max_size_bytes,
+                        max_per_album,
+                        session_rng,
+                        max_per_artist,
+                    )
+                    state.selected = selection.songs
+                    skipped_by_artist_quota = selection.skipped_by_artist_quota
+            elif choice == "n":
                 screen = 6
+            elif choice in {"f", BACK}:
+                screen = 4
             elif choice == "c":
                 return None

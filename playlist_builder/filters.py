@@ -10,15 +10,12 @@ from .normalization import normalize_for_search
 def complete_year_range(
     year_min: int | None,
     year_max: int | None,
-    available_min: int | None,
-    available_max: int | None,
-    margin: int | None = None,
+    offset: int | None = None,
 ) -> tuple[int | None, int | None]:
-    # Resolve the margin lazily so the value configured in config.ini (published
-    # to config.DEFAULT_YEAR_MARGIN by load_config) is honoured, instead of the
-    # import-time default frozen into this signature.
-    if margin is None:
-        margin = config.DEFAULT_YEAR_MARGIN
+    if offset is None:
+        offset = config.MAX_REASONABLE_YEAR_OFFSET
+    if offset < 0:
+        raise ValueError("el margen de años no puede ser negativo")
     if year_min is not None and year_max is not None:
         if year_min > year_max:
             raise ValueError("el año mínimo no puede ser mayor que el máximo")
@@ -26,17 +23,7 @@ def complete_year_range(
     year = year_min if year_min is not None else year_max
     if year is None:
         return None, None
-
-    lower = year - margin
-    upper = year + margin
-    # Limit an overlapping interval to the catalog. If it is completely outside
-    # (possible for a durable profile), preserve it so the UI shows a meaningful
-    # empty range instead of an inverted one.
-    if available_min is not None and upper >= available_min:
-        lower = max(lower, available_min)
-    if available_max is not None and lower <= available_max:
-        upper = min(upper, available_max)
-    return lower, upper
+    return year - offset, year + offset
 
 
 def song_matches(
@@ -92,6 +79,4 @@ def filter_songs(
             excluded_genres=excluded_genres,
         )
     ]
-    # Deduplication is configured per CLI run and cached by the immutable filter
-    # specification, so revisiting preview screens never re-hashes unchanged files.
     return maybe_deduplicate_songs(matched, spec)

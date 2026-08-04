@@ -3,38 +3,26 @@ from __future__ import annotations
 import configparser
 import math
 import os
-import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 from .normalization import normalize_for_search
 
 SECTION = "playlist_builder"
 GENRE_ALIASES_SECTION = "genre_aliases"
-_EXTENSION = re.compile(r"\.[a-z0-9]+\Z")
 
-# Compatibility defaults for modules imported before a configuration is loaded.
 MUSIC_ROOT = Path(r"/ruta/a/MiDiscoteca")
-DEFAULT_YEAR_MARGIN = 5
 DEFAULT_SIZE_MB = 8000.0
 DEFAULT_MAX_ALBUM = 2
-DEFAULT_RETRY_ERROR_AFTER_DAYS = 7.0
-# 0 conserva el comportamiento histórico: sin cuota por artista de pista.
 DEFAULT_MAX_ARTIST = 0
-# La deduplicación por contenido requiere activación explícita.
 DEFAULT_DEDUPLICATE = False
 CACHE_FILENAME = ".playlist_catalog.json"
 CONFIG_FILENAME = "config.ini"
 PROFILES_FILENAME = "filter_profiles.json"
-# Marca persistente escrita en el Music/ de una exportación para que escaneos
-# posteriores la excluyan sin depender de --copy. Debe ser idéntica en el
-# lado que la escribe (copier) y el que la lee (scanner).
 COPY_ROOT_MARKER = ".playlist-builder-copy-root"
-MIN_REASONABLE_YEAR = 1000
-MAX_REASONABLE_YEAR_OFFSET = 1
+MAX_REASONABLE_YEAR_OFFSET = 5
 AUDIO_EXTENSIONS = frozenset({".mp3", ".flac", ".m4a", ".mp4", ".ogg", ".opus", ".ape"})
 
 
@@ -76,19 +64,14 @@ EMPTY_GENRE_ALIASES = GenreAliases({}, {})
 @dataclass(frozen=True, slots=True)
 class Settings:
     music_root: Path
-    default_year_margin: int
     default_size_mb: float
     default_max_album: int
-    retry_error_after_days: float
     default_max_artist: int
     deduplicate: bool
     cache_filename: str
-    min_reasonable_year: int
     max_reasonable_year_offset: int
     audio_extensions: frozenset[str]
     surprise_mode: bool
-    preview_entries: int
-    copy_structure: str
     profiles_file: Path
     genre_aliases: GenreAliases
     source: Path
@@ -143,19 +126,15 @@ def _problem(path: Path, key: str, message: str) -> ConfigError:
 
 
 def _publish_compatibility_defaults(settings: Settings) -> None:
-    global MUSIC_ROOT, DEFAULT_YEAR_MARGIN, DEFAULT_SIZE_MB, DEFAULT_MAX_ALBUM
-    global DEFAULT_RETRY_ERROR_AFTER_DAYS
+    global MUSIC_ROOT, DEFAULT_SIZE_MB, DEFAULT_MAX_ALBUM
     global DEFAULT_MAX_ARTIST, DEFAULT_DEDUPLICATE
-    global CACHE_FILENAME, MIN_REASONABLE_YEAR, MAX_REASONABLE_YEAR_OFFSET, AUDIO_EXTENSIONS
+    global CACHE_FILENAME, MAX_REASONABLE_YEAR_OFFSET, AUDIO_EXTENSIONS
     MUSIC_ROOT = settings.music_root
-    DEFAULT_YEAR_MARGIN = settings.default_year_margin
     DEFAULT_SIZE_MB = settings.default_size_mb
     DEFAULT_MAX_ALBUM = settings.default_max_album
-    DEFAULT_RETRY_ERROR_AFTER_DAYS = settings.retry_error_after_days
     DEFAULT_MAX_ARTIST = settings.default_max_artist
     DEFAULT_DEDUPLICATE = settings.deduplicate
     CACHE_FILENAME = settings.cache_filename
-    MIN_REASONABLE_YEAR = settings.min_reasonable_year
     MAX_REASONABLE_YEAR_OFFSET = settings.max_reasonable_year_offset
     AUDIO_EXTENSIONS = settings.audio_extensions
 
@@ -258,23 +237,15 @@ def load_config(path: Path | str | None = None) -> Settings:
 
     expected = {
         "music_root",
-        "default_year_margin",
         "default_size_mb",
         "default_max_album",
-        "retry_error_after_days",
         "default_max_artist",
         "deduplicate",
         "cache_filename",
-        "min_reasonable_year",
         "max_reasonable_year_offset",
-        "audio_extensions",
         "surprise_mode",
-        "preview_entries",
-        "copy_structure",
-        "profiles_file",
     }
-    # Optional additions retain compatibility with existing user INIs.
-    missing = expected - {"profiles_file", "deduplicate"} - set(section)
+    missing = expected - {"deduplicate"} - set(section)
     if missing:
         key = sorted(missing)[0]
         raise _problem(source, key, "falta la clave obligatoria")
@@ -299,15 +270,6 @@ def load_config(path: Path | str | None = None) -> Settings:
             raise _problem(source, key, "debe ser un número positivo") from exc
         if not math.isfinite(value) or value <= 0:
             raise _problem(source, key, "debe ser un número finito mayor que cero")
-        return value
-
-    def nonnegative_float(key: str) -> float:
-        try:
-            value = float(section[key])
-        except ValueError as exc:
-            raise _problem(source, key, "debe ser un número no negativo") from exc
-        if not math.isfinite(value) or value < 0:
-            raise _problem(source, key, "debe ser un número finito no negativo")
         return value
 
     def nonnegative_int(key: str) -> int:
@@ -336,57 +298,20 @@ def load_config(path: Path | str | None = None) -> Settings:
     ):
         raise _problem(source, "cache_filename", "debe ser un nombre de archivo, no una ruta")
 
-    minimum = positive_int("min_reasonable_year")
-    if minimum > datetime.now().year:
-        raise _problem(source, "min_reasonable_year", "no puede ser posterior al año actual")
-    try:
-        offset = int(section["max_reasonable_year_offset"])
-    except ValueError as exc:
-        raise _problem(
-            source, "max_reasonable_year_offset", "debe ser un entero entre 0 y 100"
-        ) from exc
-    if not 0 <= offset <= 100:
-        raise _problem(source, "max_reasonable_year_offset", "debe estar entre 0 y 100")
-
-    raw_extensions = [item.strip().casefold() for item in section["audio_extensions"].split(",")]
-    if not raw_extensions or any(not item for item in raw_extensions):
-        raise _problem(source, "audio_extensions", "use extensiones separadas por comas")
-    invalid = next((item for item in raw_extensions if not _EXTENSION.fullmatch(item)), None)
-    if invalid is not None:
-        raise _problem(source, "audio_extensions", f"extensión no válida: {invalid!r}")
-    if len(set(raw_extensions)) != len(raw_extensions):
-        raise _problem(source, "audio_extensions", "contiene extensiones duplicadas")
-
     surprise_mode = _parse_boolean(source, section, "surprise_mode")
     deduplicate = _parse_boolean(source, section, "deduplicate", DEFAULT_DEDUPLICATE)
 
-    copy_structure = section["copy_structure"].strip().casefold()
-    if copy_structure not in {"flat", "tree"}:
-        raise _problem(source, "copy_structure", "debe ser 'flat' o 'tree'")
-
-    raw_profiles = section.get("profiles_file", PROFILES_FILENAME).strip()
-    if not raw_profiles:
-        raise _problem(source, "profiles_file", "la ruta no puede estar vacía")
-    profiles_file = Path(raw_profiles).expanduser()
-    if not profiles_file.is_absolute():
-        profiles_file = source.parent / profiles_file
-
     settings = Settings(
         music_root=root.resolve(),
-        default_year_margin=positive_int("default_year_margin"),
         default_size_mb=positive_float("default_size_mb"),
         default_max_album=positive_int("default_max_album"),
-        retry_error_after_days=nonnegative_float("retry_error_after_days"),
         default_max_artist=nonnegative_int("default_max_artist"),
         deduplicate=deduplicate,
         cache_filename=cache,
-        min_reasonable_year=minimum,
-        max_reasonable_year_offset=offset,
-        audio_extensions=frozenset(raw_extensions),
+        max_reasonable_year_offset=nonnegative_int("max_reasonable_year_offset"),
+        audio_extensions=AUDIO_EXTENSIONS,
         surprise_mode=surprise_mode,
-        preview_entries=positive_int("preview_entries"),
-        copy_structure=copy_structure,
-        profiles_file=profiles_file.resolve(),
+        profiles_file=(source.parent / PROFILES_FILENAME).resolve(),
         genre_aliases=GenreAliases(canonical_displays, alias_to_canonical),
         source=source,
     )

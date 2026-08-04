@@ -1,12 +1,85 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import unicodedata
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from .models import Song
+
+_URI = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+@dataclass(frozen=True, slots=True)
+class PlaylistMatchReport:
+    """Resultado de relacionar entradas locales de playlists con el catálogo."""
+
+    entries: int = 0
+    matched: int = 0
+    missing: int = 0
+    outside_root: int = 0
+    not_scanned: int = 0
+    unsupported: int = 0
+
+    @property
+    def ignored(self) -> int:
+        return self.entries - self.matched
+
+
+def read_m3u(path: Path) -> list[str]:
+    """Lee las entradas de una playlist M3U local, sin abrir sus destinos."""
+
+    if path.suffix.casefold() not in {".m3u", ".m3u8"}:
+        raise ValueError(f"El formato de playlist no es M3U/M3U8: {path}")
+    # utf-8-sig acepta tanto UTF-8 normal como el BOM habitual de M3U8.
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    return [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
+
+
+def _canonical_key(path: Path) -> str:
+    return unicodedata.normalize("NFC", str(path.resolve(strict=False)))
+
+
+def match_playlist_songs(
+    songs: list[Song], music_root: Path, playlists: list[Path]
+) -> tuple[set[Path], PlaylistMatchReport]:
+    """Devuelve rutas canónicas de canciones citadas por una unión de M3U locales."""
+
+    root = music_root.expanduser().resolve()
+    catalog = {_canonical_key(song.path): song.path for song in songs}
+    matched: set[Path] = set()
+    entries = matched_entries = missing = outside = not_scanned = unsupported = 0
+    for playlist in playlists:
+        playlist = playlist.expanduser().resolve()
+        for entry in read_m3u(playlist):
+            entries += 1
+            if _URI.match(entry):
+                unsupported += 1
+                continue
+            candidate = Path(entry).expanduser()
+            if not candidate.is_absolute():
+                candidate = playlist.parent / candidate
+            resolved = candidate.resolve(strict=False)
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                outside += 1
+                continue
+            song_path = catalog.get(_canonical_key(resolved))
+            if song_path is not None and song_path.is_file():
+                matched.add(song_path)
+                matched_entries += 1
+            elif not resolved.is_file():
+                missing += 1
+            else:
+                not_scanned += 1
+    report = PlaylistMatchReport(
+        entries, matched_entries, missing, outside, not_scanned, unsupported
+    )
+    return matched, report
 
 
 def _safe_extinf_text(value: str) -> str:

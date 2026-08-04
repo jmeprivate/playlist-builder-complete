@@ -10,7 +10,7 @@ from . import config as config_module
 from .audit import format_audit
 from .config import ConfigError, Settings, default_config_path, load_config
 from .copier import CopyTransactionError, copy_and_write_playlist
-from .m3u import write_m3u_atomic
+from .m3u import match_playlist_songs, write_m3u_atomic
 from .profiles import (
     FilterProfile,
     ProfileError,
@@ -91,6 +91,22 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
         "--audit-only", action="store_true", help="audita y termina sin abrir la interfaz"
     )
     parser.add_argument("--seed", type=int, help="semilla para una selección reproducible")
+    parser.add_argument(
+        "--from-playlist",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="RUTA",
+        help="restringe las candidatas a canciones de esta M3U/M3U8 (repetible)",
+    )
+    parser.add_argument(
+        "--exclude-playlist",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="RUTA",
+        help="excluye canciones de esta M3U/M3U8 (repetible)",
+    )
     surprise = parser.add_mutually_exclusive_group()
     surprise.add_argument(
         "--surprise", dest="surprise", action="store_true", help="oculta la selección"
@@ -144,7 +160,7 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
     destination = args.copy.expanduser().resolve() if args.copy else root
     excluded = destination / "Music" if args.copy else None
     progress = None if args.audit_only else ConsoleScanProgress(sys.stderr)
-    songs, report = scan_library(
+    songs, audit_report = scan_library(
         root,
         rescan=args.rescan,
         excluded_root=excluded,
@@ -152,12 +168,41 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         progress=progress,
     )
     if args.audit or args.audit_only:
-        print(format_audit(report, args.audit or "simple"))
+        print(format_audit(audit_report, args.audit or "simple"))
     if args.audit_only:
         return 0
     if not songs:
         print("No se encontró ninguna canción legible en la colección.", file=sys.stderr)
         return 2
+
+    if args.from_playlist:
+        included, playlist_report = match_playlist_songs(songs, root, args.from_playlist)
+        logging.getLogger(__name__).info(
+            "Playlists fuente: %d coincidencias; %d entradas ignoradas "
+            "(inexistentes=%d, fuera=%d, no escaneadas=%d, no admitidas=%d)",
+            playlist_report.matched,
+            playlist_report.ignored,
+            playlist_report.missing,
+            playlist_report.outside_root,
+            playlist_report.not_scanned,
+            playlist_report.unsupported,
+        )
+        songs = [song for song in songs if song.path in included]
+        if not songs:
+            raise ValueError("--from-playlist no contiene ninguna canción válida de la discoteca")
+    if args.exclude_playlist:
+        excluded_paths, playlist_report = match_playlist_songs(songs, root, args.exclude_playlist)
+        logging.getLogger(__name__).info(
+            "Playlists de exclusión: %d coincidencias; %d entradas ignoradas "
+            "(inexistentes=%d, fuera=%d, no escaneadas=%d, no admitidas=%d)",
+            playlist_report.matched,
+            playlist_report.ignored,
+            playlist_report.missing,
+            playlist_report.outside_root,
+            playlist_report.not_scanned,
+            playlist_report.unsupported,
+        )
+        songs = [song for song in songs if song.path not in excluded_paths]
 
     # Import after load_config(): ui.py and filters.py receive the selected
     # compatibility defaults when they import values from config.py.

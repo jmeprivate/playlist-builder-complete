@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 from .m3u import write_m3u_atomic
@@ -56,6 +57,24 @@ def _normal_flat_name(index: int, song: Song) -> str:
     return f"{index} - {_safe_component(title)} ({_safe_component(artist)}){song.path.suffix}"
 
 
+def _create_parent_directories(
+    parent: Path, destination: Path, created_directories: set[Path]
+) -> None:
+    missing: list[Path] = []
+    current = parent
+    while current != destination and not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        try:
+            directory.mkdir()
+        except FileExistsError:
+            if not directory.is_dir():
+                raise
+        else:
+            created_directories.add(directory)
+
+
 def copy_and_write_playlist(
     destination: Path,
     playlist_name: str,
@@ -70,6 +89,7 @@ def copy_and_write_playlist(
         raise PermissionError(f"El destino no es escribible: {destination}")
     stage = Path(tempfile.mkdtemp(prefix=".playlist-copy-", dir=destination))
     created: list[Path] = []
+    created_directories: set[Path] = set()
     mapping: dict[Path, Path] = {}
     staged_items: list[tuple[Path, Path, bool]] = []
     try:
@@ -103,16 +123,22 @@ def copy_and_write_playlist(
         for staged, target, reuse in staged_items:
             if reuse:
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _create_parent_directories(target.parent, destination, created_directories)
             os.replace(staged, target)
             created.append(target)
         playlist_path = destination / playlist_name
         write_m3u_atomic(playlist_path, songs, mapping)
         return CopyResult(playlist_path, mapping)
-    except (OSError, CopyTransactionError) as exc:
+    except BaseException as exc:
         for path in reversed(created):
-            path.unlink(missing_ok=True)
-        if surprise and not isinstance(exc, CopyTransactionError):
+            with suppress(OSError):
+                path.unlink(missing_ok=True)
+        for directory in sorted(
+            created_directories, key=lambda path: len(path.parts), reverse=True
+        ):
+            with suppress(OSError):
+                directory.rmdir()
+        if surprise and isinstance(exc, OSError) and not isinstance(exc, CopyTransactionError):
             raise CopyTransactionError(
                 "Falló la publicación de la copia en modo sorpresa; no se publicó el M3U"
             ) from exc

@@ -19,9 +19,11 @@ Python 3.12 o posterior en macOS, Windows 11 y Linux.
 - Los valores múltiples de `Genre` separados por comas, punto y coma o valores nativos independientes
   se convierten en géneros separados; por ejemplo, `Jazz, Contemporary Jazz` permite buscar cualquiera.
 - La caché `.playlist_catalog.json` se guarda en la raíz musical, usa rutas relativas y compara
-  ruta, tamaño y `mtime_ns`. Su reemplazo es atómico y una caché corrupta se ignora.
+  ruta, tamaño y `mtime_ns`. Incluye la firma de configuración y un digest SHA-256; una caché
+  manipulada, corrupta o incompatible se descarta. Su reemplazo es atómico.
 - Los M3U usan UTF-8, separadores `/` y saltos de línea LF. Es una combinación entendida por los
-  reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos.
+  reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos. Los controles que
+  podrían inyectar líneas en `#EXTINF` se sustituyen sin eliminar marcas Unicode de formato legítimas.
 
 No existe una incompatibilidad técnica general con los formatos pedidos, aunque la disponibilidad
 real de etiquetas depende de que cada archivo las contenga y de que `mutagen` reconozca esa variante.
@@ -171,9 +173,9 @@ y no favorece sistemáticamente los primeros artistas.
 ## Copia segura
 
 Con `--copy`, primero se copian todas las pistas a una zona temporal mediante `shutil.copy2`. Solo
-después se publican en `Music/`, y el M3U se publica el último. Ante un fallo se retiran exclusivamente
-los archivos creados por esa operación; nunca se borran archivos preexistentes. Una copia idéntica
-se reutiliza y una colisión con contenido distinto recibe un sufijo incremental.
+después se publican en `Music/`, y el M3U se publica el último. Ante un fallo o `Ctrl+C` se retiran
+exclusivamente los archivos y directorios creados por esa operación; nunca se borran elementos
+preexistentes. Una copia idéntica se reutiliza y una colisión distinta recibe un sufijo incremental.
 
 Si el destino se encuentra dentro de la discoteca, se excluye por completo del escaneo de esa
 ejecución. Los archivos originales nunca se modifican.
@@ -181,8 +183,9 @@ ejecución. Los archivos originales nunca se modifican.
 ## Auditoría
 
 La auditoría se recopila durante el escaneo normal. `simple` cuenta archivos, tags ausentes y errores.
-`full` añade cada ruta, sus tags ausentes y el error concreto. Un archivo corrupto, borrado durante el
-escaneo o con metadatos no legibles no detiene el resto.
+`full` añade cada ruta, sus tags ausentes y el error concreto. Un archivo corrupto, un error inesperado
+del lector o un directorio inaccesible se registra sin detener el resto; los fallos de directorio no se
+contabilizan falsamente como canciones ilegibles.
 
 ## Pruebas y calidad
 
@@ -194,8 +197,9 @@ mypy playlist_builder
 ```
 
 Los tests usan directorios temporales y lectores simulados: no acceden a la colección real. Cubren
-normalización, años, filtros, tags ausentes, selección por rondas, límites, semillas, M3U, caché,
-auditoría, colisiones y fallos de copia. Incluyen además regresiones obtenidas de ejemplos MP3 y FLAC
+normalización, años, filtros, tags ausentes, selección por rondas, límites, semillas, M3U, integridad
+de caché, auditoría, colisiones, fallos de copia y rollback ante interrupciones. Incluyen además
+regresiones obtenidas de ejemplos MP3 y FLAC
 reales con `Artist`/`AlbumArtist`, géneros separados por comas y nombres Unicode descompuestos.
 
 ## Solución de problemas

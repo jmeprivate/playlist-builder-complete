@@ -35,6 +35,24 @@ def _collision_free_target(target: Path, source: Path) -> tuple[Path, bool]:
         index += 1
 
 
+def _create_parent_directories(
+    parent: Path, destination: Path, created_directories: set[Path]
+) -> None:
+    missing: list[Path] = []
+    current = parent
+    while current != destination and not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        try:
+            directory.mkdir()
+        except FileExistsError:
+            if not directory.is_dir():
+                raise
+        else:
+            created_directories.add(directory)
+
+
 def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[Song]) -> CopyResult:
     destination = destination.expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
@@ -42,6 +60,7 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
         raise PermissionError(f"El destino no es escribible: {destination}")
     stage = Path(tempfile.mkdtemp(prefix=".playlist-copy-", dir=destination))
     created: list[Path] = []
+    created_directories: set[Path] = set()
     mapping: dict[Path, Path] = {}
     staged_items: list[tuple[Path, Path, bool]] = []
     try:
@@ -63,7 +82,7 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
         for staged, target, reuse in staged_items:
             if reuse:
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _create_parent_directories(target.parent, destination, created_directories)
             os.replace(staged, target)
             created.append(target)
 
@@ -76,14 +95,13 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
-        for path in reversed(created):
-            parent = path.parent
-            while parent != destination and destination in parent.parents:
-                try:
-                    parent.rmdir()
-                except OSError:
-                    break
-                parent = parent.parent
+        for directory in sorted(
+            created_directories, key=lambda path: len(path.parts), reverse=True
+        ):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
         raise
     finally:
         shutil.rmtree(stage, ignore_errors=True)

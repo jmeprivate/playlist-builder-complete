@@ -5,11 +5,15 @@ import math
 import os
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .normalization import normalize_for_search
+
 SECTION = "playlist_builder"
+GENRE_ALIASES_SECTION = "genre_aliases"
 _EXTENSION = re.compile(r"\.[a-z0-9]+\Z")
 
 # Compatibility defaults for modules imported before a configuration is loaded.
@@ -32,6 +36,37 @@ class ConfigError(ValueError):
     """An actionable error in a user configuration file."""
 
 
+class _CasePreservingConfigParser(configparser.ConfigParser):
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
+@dataclass(frozen=True, slots=True)
+class GenreAliases:
+    """Manual, display-preserving genre equivalences loaded from the INI."""
+
+    canonical_displays: dict[str, str]
+    alias_to_canonical: dict[str, str]
+
+    def resolve(self, value: str) -> str:
+        normalized = normalize_for_search(value)
+        return self.alias_to_canonical.get(normalized, normalized)
+
+    def display_options(self, values: Iterable[str]) -> tuple[str, ...]:
+        by_normalized: dict[str, str] = {}
+        for raw in values:
+            display = " ".join(str(raw).split())
+            normalized = normalize_for_search(display)
+            if not normalized:
+                continue
+            resolved = self.alias_to_canonical.get(normalized, normalized)
+            by_normalized.setdefault(resolved, self.canonical_displays.get(resolved, display))
+        return tuple(by_normalized.values())
+
+
+EMPTY_GENRE_ALIASES = GenreAliases({}, {})
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     music_root: Path
@@ -48,6 +83,7 @@ class Settings:
     preview_entries: int
     copy_structure: str
     profiles_file: Path
+    genre_aliases: GenreAliases
     source: Path
 
 
@@ -121,21 +157,58 @@ def load_config(path: Path | str | None = None) -> Settings:
     if path is None and not source.exists():
         _install_default_config(source)
 
-    parser = configparser.ConfigParser(interpolation=None, strict=True)
+    parser = _CasePreservingConfigParser(interpolation=None, strict=True)
     try:
         with source.open(encoding="utf-8") as stream:
             parser.read_file(stream)
     except FileNotFoundError as exc:
         raise ConfigError(f"No se encontró el archivo de configuración: {source}") from exc
+    except configparser.ParsingError as exc:
+        raise ConfigError(
+            f"No se pudo leer la configuración {source}: formato INI no válido; "
+            f"compruebe que no haya una clave canónica vacía ({exc})"
+        ) from exc
     except (OSError, UnicodeError, configparser.Error) as exc:
         raise ConfigError(f"No se pudo leer la configuración {source}: {exc}") from exc
 
-    extra_sections = set(parser.sections()) - {SECTION}
+    extra_sections = set(parser.sections()) - {SECTION, GENRE_ALIASES_SECTION}
     if extra_sections:
         section_name = sorted(extra_sections)[0]
         raise ConfigError(f"{source} [{section_name}]: sección desconocida")
     if SECTION not in parser:
         raise ConfigError(f"{source}: falta la sección [{SECTION}]")
+
+    canonical_displays: dict[str, str] = {}
+    alias_to_canonical: dict[str, str] = {}
+    alias_items = (
+        parser.items(GENRE_ALIASES_SECTION, raw=True)
+        if parser.has_section(GENRE_ALIASES_SECTION)
+        else ()
+    )
+    for raw_canonical, raw_value in alias_items:
+        canonical = " ".join(raw_canonical.split())
+        canonical_normalized = normalize_for_search(canonical)
+        if not canonical_normalized:
+            raise ConfigError(
+                f"{source} [{GENRE_ALIASES_SECTION}]: la clave canónica no puede estar vacía"
+            )
+        aliases = raw_value.split(";")
+        if any(not alias.strip() for alias in aliases):
+            raise ConfigError(
+                f"{source} [{GENRE_ALIASES_SECTION}] {canonical}: "
+                "los alias separados por ';' no pueden estar vacíos"
+            )
+        for value in (canonical, *aliases):
+            normalized = normalize_for_search(value)
+            previous = alias_to_canonical.get(normalized)
+            if previous is not None and previous != canonical_normalized:
+                other = canonical_displays[previous]
+                raise ConfigError(
+                    f"{source} [{GENRE_ALIASES_SECTION}] {canonical}: {value.strip()!r} "
+                    f"también está asignado a {other!r}; el alias es ambiguo"
+                )
+            alias_to_canonical[normalized] = canonical_normalized
+        canonical_displays[canonical_normalized] = canonical
 
     section = parser[SECTION]
     expected = {
@@ -272,6 +345,7 @@ def load_config(path: Path | str | None = None) -> Settings:
         preview_entries=positive_int("preview_entries"),
         copy_structure=copy_structure,
         profiles_file=profiles_file.resolve(),
+        genre_aliases=GenreAliases(canonical_displays, alias_to_canonical),
         source=source,
     )
     _publish_compatibility_defaults(settings)

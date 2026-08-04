@@ -55,9 +55,7 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     size = settings.default_size_mb if settings else config_module.DEFAULT_SIZE_MB
     max_album = settings.default_max_album if settings else config_module.DEFAULT_MAX_ALBUM
     max_artist = settings.default_max_artist if settings else config_module.DEFAULT_MAX_ARTIST
-    deduplicate_default = (
-        settings.deduplicate if settings else config_module.DEFAULT_DEDUPLICATE
-    )
+    deduplicate_default = settings.deduplicate if settings else config_module.DEFAULT_DEDUPLICATE
     source = settings.source if settings else default_config_path()
     parser = argparse.ArgumentParser(
         description="Genera playlists M3U equilibradas desde una discoteca local.",
@@ -329,8 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.force and not args.save_profile:
             raise ValueError("--force solo puede usarse junto con --save-profile")
         copy_structure_given = any(
-            item == "--copy-structure" or item.startswith("--copy-structure=")
-            for item in raw_args
+            item == "--copy-structure" or item.startswith("--copy-structure=") for item in raw_args
         )
         if copy_structure_given and not args.copy:
             raise ValueError("--copy-structure solo puede usarse junto con --copy")

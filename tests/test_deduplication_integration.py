@@ -34,9 +34,7 @@ copy_structure = flat
 
 def test_old_config_defaults_deduplication_off(tmp_path: Path) -> None:
     old_settings = load_config(_write_config(tmp_path / "old.ini"))
-    enabled_settings = load_config(
-        _write_config(tmp_path / "on.ini", deduplicate="true")
-    )
+    enabled_settings = load_config(_write_config(tmp_path / "on.ini", deduplicate="true"))
 
     assert old_settings.deduplicate is False
     assert enabled_settings.deduplicate is True

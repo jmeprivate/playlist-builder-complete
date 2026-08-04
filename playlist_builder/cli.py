@@ -240,6 +240,7 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         preview_entries=settings.preview_entries,
         initial_profile=getattr(args, "loaded_profile", None),
         on_confirm=save_confirmed if args.save_profile else None,
+        genre_aliases=settings.genre_aliases,
     )
     if result is None:
         print("Operación cancelada; no se creó ningún archivo.")

@@ -3,13 +3,11 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Iterable, Mapping
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from mutagen import File as MutagenFile
 
-from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
 from .models import Song
 from .normalization import deduplicate_display_values
 
@@ -19,27 +17,12 @@ _MULTI_VALUE_RE = re.compile(r"[;\x00]+")
 _GENRE_MULTI_VALUE_RE = re.compile(r"[,;\x00]+")
 
 
-def parse_year(
-    value: object,
-    current_year: int | None = None,
-    *,
-    min_reasonable_year: int | None = None,
-    max_reasonable_year_offset: int | None = None,
-) -> int | None:
-    minimum = MIN_REASONABLE_YEAR if min_reasonable_year is None else min_reasonable_year
-    offset = (
-        MAX_REASONABLE_YEAR_OFFSET
-        if max_reasonable_year_offset is None
-        else max_reasonable_year_offset
-    )
-    ceiling = (current_year or datetime.now().year) + offset
+def parse_year(value: object) -> int | None:
     values: Iterable[object] = value if isinstance(value, (list, tuple)) else (value,)
     for item in values:
         match = _YEAR_RE.search(str(item))
         if match:
-            year = int(match.group(1))
-            if minimum <= year <= ceiling:
-                return year
+            return int(match.group(1))
     return None
 
 
@@ -62,13 +45,7 @@ def _tag_values(
     return list(deduplicate_display_values(result))
 
 
-def read_song(
-    path: Path,
-    root: Path,
-    *,
-    min_reasonable_year: int | None = None,
-    max_reasonable_year_offset: int | None = None,
-) -> Song:
+def read_song(path: Path, root: Path) -> Song:
     audio = MutagenFile(path, easy=True)
     if audio is None:
         raise ValueError("mutagen no reconoce el formato o no pudo abrirlo")
@@ -90,11 +67,7 @@ def read_song(
         artist=tuple(artists),
         album_artists=tuple(album_artists),
         genres=tuple(genres),
-        year=parse_year(
-            years,
-            min_reasonable_year=min_reasonable_year,
-            max_reasonable_year_offset=max_reasonable_year_offset,
-        ),
+        year=parse_year(years),
         album=albums[0] if albums else path.parent.name,
         album_directory=relative.parent,
         size_bytes=path.stat().st_size,

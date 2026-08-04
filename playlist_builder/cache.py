@@ -11,10 +11,8 @@ from typing import Any
 from .models import Song
 
 LOGGER = logging.getLogger(__name__)
-# AlbumArtist forma parte de la identidad filtrable de una entrada. Una caché v1 no
-# lo conservaba, por lo que reutilizarla haría que la nueva pantalla pareciese vacía
-# hasta que cada archivo cambiase. Invalidarla fuerza una única relectura segura.
-CACHE_VERSION = 2
+# Version 3 includes AlbumArtist in Song and the metadata configuration signature.
+CACHE_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,11 +23,15 @@ class CacheEntry:
     error: str | None
 
 
-def load_cache(path: Path, root: Path) -> dict[str, CacheEntry]:
+def load_cache(path: Path, root: Path, metadata_signature: str) -> dict[str, CacheEntry]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if raw.get("version") != CACHE_VERSION or not isinstance(raw.get("files"), dict):
-            raise ValueError("versión o estructura incompatible")
+        if (
+            raw.get("version") != CACHE_VERSION
+            or raw.get("metadata_signature") != metadata_signature
+            or not isinstance(raw.get("files"), dict)
+        ):
+            raise ValueError("versión, configuración o estructura incompatible")
         entries: dict[str, CacheEntry] = {}
         for relative, value in raw["files"].items():
             song_data = value.get("song")
@@ -48,9 +50,10 @@ def load_cache(path: Path, root: Path) -> dict[str, CacheEntry]:
         return {}
 
 
-def write_cache(path: Path, entries: dict[str, CacheEntry]) -> None:
+def write_cache(path: Path, entries: dict[str, CacheEntry], metadata_signature: str) -> None:
     data: dict[str, Any] = {
         "version": CACHE_VERSION,
+        "metadata_signature": metadata_signature,
         "files": {
             relative: {
                 "size": entry.size,

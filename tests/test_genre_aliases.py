@@ -85,6 +85,16 @@ def test_exclusion_keeps_precedence_when_both_filters_use_aliases(
     )
 
 
+def test_playlist_builder_keys_remain_case_insensitive(tmp_path: Path) -> None:
+    path = write_config(tmp_path / "mixed-case.ini")
+    text = path.read_text(encoding="utf-8").replace("music_root", "Music_Root")
+    path.write_text(text, encoding="utf-8")
+
+    settings = load_config(path)
+
+    assert settings.music_root == (tmp_path / "music").resolve()
+
+
 @pytest.mark.parametrize(
     "body, message",
     [

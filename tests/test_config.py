@@ -11,16 +11,12 @@ from playlist_builder.config import ConfigError, load_config
 def write_config(path: Path, **changes: str) -> Path:
     values = {
         "music_root": "music",
-        "default_year_margin": "5",
         "default_size_mb": "8000",
         "default_max_album": "2",
-        "retry_error_after_days": "7",
         "default_max_artist": "0",
         "cache_filename": ".cache.json",
-        "min_reasonable_year": "1000",
-        "max_reasonable_year_offset": "1",
+        "max_reasonable_year_offset": "5",
         "surprise_mode": "false",
-        "preview_entries": "5",
     } | changes
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -38,10 +34,9 @@ def test_load_valid_config_normalizes_values(tmp_path: Path) -> None:
     )
     assert settings.profiles_file == (tmp_path / "filter_profiles.json").resolve()
     assert settings.default_size_mb == 8000
-    assert settings.retry_error_after_days == 7
     assert settings.default_max_artist == 0
+    assert settings.max_reasonable_year_offset == 5
     assert settings.surprise_mode is False
-    assert settings.preview_entries == 5
 
 
 def test_cli_values_override_ini(tmp_path: Path) -> None:
@@ -82,9 +77,8 @@ def test_installed_default_is_copied_to_user_config(
         ({"default_size_mb": "nan"}, "default_size_mb"),
         ({"cache_filename": "folder\\cache.json"}, "cache_filename"),
         ({"surprise_mode": "perhaps"}, "surprise_mode"),
-        ({"preview_entries": "0"}, "preview_entries"),
-        ({"retry_error_after_days": "-1"}, "retry_error_after_days"),
         ({"default_max_artist": "-1"}, "default_max_artist"),
+        ({"max_reasonable_year_offset": "-1"}, "max_reasonable_year_offset"),
     ],
 )
 def test_invalid_values_identify_file_section_and_key(
@@ -103,9 +97,15 @@ def test_invalid_values_identify_file_section_and_key(
         ("audio_extensions", ".mp3"),
         ("copy_structure", "tree"),
         ("profiles_file", "other.json"),
+        ("default_year_margin", "5"),
+        ("retry_error_after_days", "7"),
+        ("min_reasonable_year", "1000"),
+        ("preview_entries", "5"),
     ],
 )
-def test_fixed_behaviors_cannot_be_configured(tmp_path: Path, key: str, value: str) -> None:
+def test_fixed_or_removed_behaviors_cannot_be_configured(
+    tmp_path: Path, key: str, value: str
+) -> None:
     path = write_config(tmp_path / "unsupported.ini", **{key: value})
     with pytest.raises(ConfigError, match=rf"{key}: clave desconocida"):
         load_config(path)

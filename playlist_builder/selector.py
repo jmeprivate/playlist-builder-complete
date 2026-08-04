@@ -19,7 +19,7 @@ def select_balanced(
     candidates: list[Song],
     max_size_bytes: int,
     max_per_album: int,
-    seed: int | None = None,
+    seed: int | random.Random | None = None,
     max_per_artist: int | None = None,
 ) -> list[Song]:
     return select_balanced_with_stats(
@@ -31,7 +31,7 @@ def select_balanced_with_stats(
     candidates: list[Song],
     max_size_bytes: int,
     max_per_album: int,
-    seed: int | None = None,
+    seed: int | random.Random | None = None,
     max_per_artist: int | None = None,
 ) -> SelectionResult:
     if max_size_bytes <= 0:
@@ -41,7 +41,7 @@ def select_balanced_with_stats(
     if max_per_artist is not None and max_per_artist < 0:
         raise ValueError("max_per_artist no puede ser negativo")
     artist_limit = max_per_artist or None
-    randomizer = random.Random(seed)
+    randomizer = seed if isinstance(seed, random.Random) else random.Random(seed)
     grouped: dict[Path, list[Song]] = defaultdict(list)
     for song in sorted(
         candidates,
@@ -102,7 +102,7 @@ def estimate_selection_count(
     candidates: list[Song],
     max_size_bytes: int,
     max_per_album: int,
-    seed: int | None = None,
+    seed: int | random.Random | None = None,
     max_per_artist: int | None = None,
 ) -> int:
     return len(select_balanced(candidates, max_size_bytes, max_per_album, seed, max_per_artist))

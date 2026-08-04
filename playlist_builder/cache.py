@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -11,10 +13,8 @@ from typing import Any
 from .models import Song
 
 LOGGER = logging.getLogger(__name__)
-# AlbumArtist forma parte de la identidad filtrable de una entrada. Una caché v1 no
-# lo conservaba, por lo que reutilizarla haría que la nueva pantalla pareciese vacía
-# hasta que cada archivo cambiase. Invalidarla fuerza una única relectura segura.
-CACHE_VERSION = 2
+# Version 4 adds an integrity digest to AlbumArtist-aware, configuration-bound entries.
+CACHE_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,13 +25,35 @@ class CacheEntry:
     error: str | None
 
 
-def load_cache(path: Path, root: Path) -> dict[str, CacheEntry]:
+def _payload_digest(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def load_cache(path: Path, root: Path, metadata_signature: str = "") -> dict[str, CacheEntry]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if raw.get("version") != CACHE_VERSION or not isinstance(raw.get("files"), dict):
-            raise ValueError("versión o estructura incompatible")
+        if not isinstance(raw, dict):
+            raise ValueError("estructura incompatible")
+        digest = raw.get("digest")
+        payload = {key: value for key, value in raw.items() if key != "digest"}
+        if not isinstance(digest, str) or not hmac.compare_digest(digest, _payload_digest(payload)):
+            raise ValueError("la caché fue modificada o está dañada")
+        if (
+            payload.get("version") != CACHE_VERSION
+            or payload.get("metadata_signature", "") != metadata_signature
+            or not isinstance(payload.get("files"), dict)
+        ):
+            raise ValueError("versión, configuración o estructura incompatible")
         entries: dict[str, CacheEntry] = {}
-        for relative, value in raw["files"].items():
+        for relative, value in payload["files"].items():
+            if not isinstance(value, dict):
+                raise ValueError("entrada de caché incompatible")
             song_data = value.get("song")
             entries[str(relative)] = CacheEntry(
                 size=int(value["size"]),
@@ -48,9 +70,10 @@ def load_cache(path: Path, root: Path) -> dict[str, CacheEntry]:
         return {}
 
 
-def write_cache(path: Path, entries: dict[str, CacheEntry]) -> None:
-    data: dict[str, Any] = {
+def write_cache(path: Path, entries: dict[str, CacheEntry], metadata_signature: str = "") -> None:
+    payload: dict[str, Any] = {
         "version": CACHE_VERSION,
+        "metadata_signature": metadata_signature,
         "files": {
             relative: {
                 "size": entry.size,
@@ -61,6 +84,7 @@ def write_cache(path: Path, entries: dict[str, CacheEntry]) -> None:
             for relative, entry in sorted(entries.items())
         },
     }
+    data = {**payload, "digest": _payload_digest(payload)}
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
     try:
@@ -68,11 +92,15 @@ def write_cache(path: Path, entries: dict[str, CacheEntry]) -> None:
             "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
         ) as handle:
             temporary = Path(handle.name)
-            json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
+            json.dump(data, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-    except OSError as exc:
-        LOGGER.warning("No se pudo escribir la caché %s: %s", path, exc)
+    except KeyboardInterrupt:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        LOGGER.warning("No se pudo escribir la caché %s: %s", path, exc)

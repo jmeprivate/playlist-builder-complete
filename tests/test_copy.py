@@ -68,3 +68,29 @@ def test_keyboard_interrupt_rolls_back_published_tracks(
     assert not (destination / "Interrupted.m3u").exists()
     assert not list((destination / "Music").rglob("*"))
     assert not list(destination.glob(".playlist-copy-*"))
+
+
+def test_rollback_preserves_preexisting_empty_directories(
+    tmp_path: Path, song_factory: Callable[..., Song], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    songs = [song_factory(), song_factory()]
+    destination = tmp_path / "export"
+    preexisting = destination / "Music" / "A" / "Artist"
+    preexisting.mkdir(parents=True)
+    real_replace = copier.os.replace
+    calls = 0
+
+    def interrupting_replace(source: Path, target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        real_replace(source, target)
+
+    monkeypatch.setattr(copier.os, "replace", interrupting_replace)
+    with pytest.raises(KeyboardInterrupt):
+        copy_and_write_playlist(destination, "Interrupted.m3u", songs)
+
+    assert preexisting.is_dir()
+    assert not list(preexisting.rglob("*"))
+    assert not list(destination.glob(".playlist-copy-*"))

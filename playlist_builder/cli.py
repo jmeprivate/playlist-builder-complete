@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     bootstrap = argparse.ArgumentParser(add_help=False)
-    bootstrap.add_argument("--config", type=Path, default=default_config_path())
+    bootstrap.add_argument("--config", type=Path)
     bootstrap.add_argument("--debug", action="store_true")
     preliminary, _ = bootstrap.parse_known_args(raw_args)
     try:

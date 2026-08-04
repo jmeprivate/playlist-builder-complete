@@ -125,12 +125,23 @@ def _display_title(song: Song) -> str:
     return _safe_extinf_text(song.path.stem)
 
 
+def surprise_display_name(index: int, playlist_name: str, song: Song) -> str:
+    return f"{index} - {Path(playlist_name).stem}{song.path.suffix}"
+
+
 def render_m3u(
-    songs: list[Song], playlist_directory: Path, path_overrides: Mapping[Path, Path] | None = None
+    songs: list[Song],
+    playlist_directory: Path,
+    path_overrides: Mapping[Path, Path] | None = None,
+    *,
+    surprise: bool = False,
+    playlist_name: str | None = None,
 ) -> str:
+    if surprise and playlist_name is None:
+        raise ValueError("playlist_name es obligatorio en modo sorpresa")
     overrides = path_overrides or {}
     lines = ["#EXTM3U"]
-    for song in songs:
+    for index, song in enumerate(songs, 1):
         duration = int(song.duration_seconds) if song.duration_seconds is not None else -1
         target = overrides.get(song.path, song.path)
         try:
@@ -140,15 +151,31 @@ def render_m3u(
         portable_entry = Path(entry).as_posix()
         if "\n" in portable_entry or "\r" in portable_entry:
             raise ValueError(f"La ruta no se puede representar de forma segura en M3U: {target}")
-        lines.extend((f"#EXTINF:{duration},{_display_title(song)}", portable_entry))
+        title = (
+            surprise_display_name(index, playlist_name, song)
+            if surprise and playlist_name is not None
+            else _display_title(song)
+        )
+        lines.extend((f"#EXTINF:{duration},{title}", portable_entry))
     return "\n".join(lines) + "\n"
 
 
 def write_m3u_atomic(
-    path: Path, songs: list[Song], path_overrides: Mapping[Path, Path] | None = None
+    path: Path,
+    songs: list[Song],
+    path_overrides: Mapping[Path, Path] | None = None,
+    *,
+    surprise: bool = False,
+    playlist_name: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    content = render_m3u(songs, path.parent, path_overrides)
+    content = render_m3u(
+        songs,
+        path.parent,
+        path_overrides,
+        surprise=surprise,
+        playlist_name=playlist_name,
+    )
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(

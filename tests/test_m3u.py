@@ -9,7 +9,7 @@ from playlist_builder.models import Song
 from playlist_builder.selector import select_balanced
 
 
-def test_m3u_relative_paths_unicode_spaces_and_extinf(
+def test_m3u_absolute_paths_unicode_spaces_and_extinf(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:
     song = song_factory(
@@ -17,16 +17,16 @@ def test_m3u_relative_paths_unicode_spaces_and_extinf(
     )
     content = render_m3u([song], tmp_path)
     assert content.startswith("#EXTM3U\n#EXTINF:238,Björk - Jóga\n")
-    assert "A/Artist/Album/01 - Jóga.flac\n" in content
+    assert f"{song.path.resolve().as_posix()}\n" in content
     assert "\\" not in content
 
 
-def test_m3u_copy_override_is_relative(tmp_path: Path, song_factory: Callable[..., Song]) -> None:
+def test_m3u_copy_override_is_absolute(tmp_path: Path, song_factory: Callable[..., Song]) -> None:
     song = song_factory()
     copied = tmp_path / "export" / "Music" / song.relative_path
     content = render_m3u([song], tmp_path / "export", {song.path: copied})
-    assert f"Music/{song.relative_path.as_posix()}" in content
-    assert str(song.path) not in content
+    assert copied.resolve().as_posix() in content
+    assert song.path.resolve().as_posix() not in content
 
 
 def test_surprise_extinf_names_are_identical_with_and_without_copy(

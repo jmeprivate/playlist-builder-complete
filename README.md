@@ -71,6 +71,7 @@ music_root = /Users/usuario/Música/MiDiscoteca
 profiles_file = filter_profiles.json
 retry_error_after_days = 7
 default_max_artist = 0
+deduplicate = false
 ```
 
 ## Ejecución
@@ -82,6 +83,7 @@ python crear_playlist.py
 python crear_playlist.py --size 4000
 python crear_playlist.py --size 4000 --max-album 1
 python crear_playlist.py --max-artist 3
+python crear_playlist.py --deduplicate
 python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
@@ -111,6 +113,10 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--max-album N`: máximo de canciones por carpeta de álbum; vale 2 por defecto.
 - `--max-artist N`: máximo de canciones por artista de pista. `0`, un valor vacío o
   `sin límite` desactiva la cuota; está desactivada por defecto.
+- `--deduplicate` / `--no-deduplicate`: activa o desactiva la eliminación de candidatas idénticas por
+  contenido. La CLI prevalece sobre `deduplicate` en `config.ini` y la opción está desactivada por
+  defecto. Solo se calculan hashes SHA-256 entre archivos del mismo tamaño; los fallos de lectura
+  conservan la canción como candidata y nunca se modifican, eliminan, enlazan ni renombran originales.
 - `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
   planos `índice - título (artista).ext`.
 - `--copy-structure flat|tree`: el valor `flat` produce, por ejemplo,
@@ -168,7 +174,8 @@ ofrece `[a]ceptar`, `[r]ehacer`, `[v]er completa` y `[c]ancelar`. Rehacer conser
 Con `--seed`, la selección es reproducible y la interfaz no finge que puede rehacerla al azar: ofrece
 volver a filtros o cancelar. La selección aceptada es exactamente la confirmada y escrita.
 
-Las preferencias de preview y copia viven en el mismo `config.ini` que el resto de la configuración:
+Las preferencias de preview, copia y deduplicación viven en el mismo `config.ini` que el resto de la
+configuración:
 
 ```ini
 [playlist_builder]
@@ -177,6 +184,7 @@ preview_entries = 5
 copy_structure = flat
 retry_error_after_days = 7
 default_max_artist = 0
+deduplicate = false
 ```
 
 En un checkout se usa el `config.ini` de la raíz del proyecto. Tras instalar, la plantilla incluida
@@ -286,7 +294,7 @@ playlist_builder/
 ├── pyproject.toml
 ├── playlist_builder/
 │   ├── audit.py, cache.py, cli.py, config.py, copier.py
-│   ├── filters.py, m3u.py, metadata.py, models.py
+│   ├── deduplication.py, filters.py, m3u.py, metadata.py, models.py
 │   ├── normalization.py, scanner.py, selector.py, ui.py
 └── tests/
 ```

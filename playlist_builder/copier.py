@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import filecmp
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -14,28 +15,51 @@ class CopyTransactionError(RuntimeError):
     pass
 
 
-def _collision_free_target(target: Path, source: Path) -> tuple[Path, bool]:
-    if not target.exists():
+def _collision_free_target(
+    target: Path, source: Path, reserved: set[Path] | None = None
+) -> tuple[Path, bool]:
+    unavailable = reserved or set()
+    if not target.exists() and target not in unavailable:
         return target, False
-    try:
-        if filecmp.cmp(source, target, shallow=False):
-            return target, True
-    except OSError:
-        pass
+    if target not in unavailable:
+        try:
+            if filecmp.cmp(source, target, shallow=False):
+                return target, True
+        except OSError:
+            pass
     index = 2
     while True:
         candidate = target.with_name(f"{target.stem} ({index}){target.suffix}")
-        if not candidate.exists():
+        if not candidate.exists() and candidate not in unavailable:
             return candidate, False
-        try:
-            if filecmp.cmp(source, candidate, shallow=False):
-                return candidate, True
-        except OSError:
-            pass
+        if candidate not in unavailable:
+            try:
+                if filecmp.cmp(source, candidate, shallow=False):
+                    return candidate, True
+            except OSError:
+                pass
         index += 1
 
 
-def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[Song]) -> CopyResult:
+def _safe_component(value: str) -> str:
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).rstrip(" .")
+    return value or "Playlist"
+
+
+def _normal_flat_name(index: int, song: Song) -> str:
+    title = song.title or song.path.stem
+    artist = ", ".join(song.artist) or "Artista desconocido"
+    return f"{index} - {_safe_component(title)} ({_safe_component(artist)}){song.path.suffix}"
+
+
+def copy_and_write_playlist(
+    destination: Path,
+    playlist_name: str,
+    songs: list[Song],
+    *,
+    surprise: bool = False,
+    copy_structure: str = "flat",
+) -> CopyResult:
     destination = destination.expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     if not os.access(destination, os.W_OK):
@@ -45,10 +69,19 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
     mapping: dict[Path, Path] = {}
     staged_items: list[tuple[Path, Path, bool]] = []
     try:
-        for index, song in enumerate(songs):
+        reserved: set[Path] = set()
+        base_name = _safe_component(Path(playlist_name).stem)
+        for index, song in enumerate(songs, 1):
+            if surprise:
+                relative = Path(f"{index} - {base_name}{song.path.suffix}")
+            elif copy_structure == "tree":
+                relative = song.relative_path
+            else:
+                relative = Path(_normal_flat_name(index, song))
             final_target, reuse = _collision_free_target(
-                destination / "Music" / song.relative_path, song.path
+                destination / "Music" / relative, song.path, reserved
             )
+            reserved.add(final_target)
             mapping[song.path] = final_target
             if reuse:
                 staged_items.append((Path(), final_target, True))
@@ -57,7 +90,8 @@ def copy_and_write_playlist(destination: Path, playlist_name: str, songs: list[S
             try:
                 shutil.copy2(song.path, staged)
             except OSError as exc:
-                raise CopyTransactionError(f"Falló la copia de {song.path}: {exc}") from exc
+                detail = "una canción seleccionada" if surprise else str(song.path)
+                raise CopyTransactionError(f"Falló la copia de {detail}: {exc}") from exc
             staged_items.append((staged, final_target, False))
         for staged, target, reuse in staged_items:
             if reuse:

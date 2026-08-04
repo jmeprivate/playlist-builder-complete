@@ -30,6 +30,7 @@ packages = ["playlist_builder"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
@@ -43,4 +44,3 @@ python_version = "3.12"
 strict = true
 warn_unused_ignores = true
 ignore_missing_imports = true
-

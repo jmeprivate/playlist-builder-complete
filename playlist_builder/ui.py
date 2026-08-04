@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import random
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -69,6 +70,7 @@ class UIState:
     year_min: int | None = None
     year_max: int | None = None
     playlist_name: str = ""
+    selected: list[Song] = field(default_factory=list)
 
 
 class SubstringCompleter(Completer):
@@ -204,6 +206,8 @@ def _simple_prompt(message: str, default: str = "") -> str:
 
 def sanitize_playlist_name(value: str, platform: str | None = None) -> str:
     name = value.strip()
+    if not name.strip(". "):
+        raise ValueError("el nombre de la playlist no puede estar vacío, ser '.' ni '..'")
     system = platform or os.name
     illegal = r'[<>:"/\\|?*\x00-\x1f]' if system == "nt" else r"[/\x00]"
     name = re.sub(illegal, "_", name)
@@ -257,6 +261,58 @@ def _format_mb(size: int) -> str:
     return f"{size / 1_000_000:.2f} MB"
 
 
+def format_song(song: Song) -> str:
+    artist = ", ".join(song.artist) or "Artista desconocido"
+    title = song.title or song.path.stem
+    details = [value for value in (song.album, str(song.year) if song.year else "") if value]
+    suffix = f" — {' · '.join(details)}" if details else ""
+    return f"{artist} - {title}{suffix}"
+
+
+def format_preview(
+    selected: list[Song],
+    *,
+    max_size_bytes: int,
+    max_per_album: int,
+    edge_entries: int,
+    full: bool = False,
+) -> str:
+    """Render a preview without changing selection or navigation state."""
+    lines = [
+        "\nPreview de la selección",
+        f"{len(selected)} canciones · {_format_mb(sum(song.size_bytes for song in selected))}",
+        f"Límites: {_format_mb(max_size_bytes)} · máximo {max_per_album} por álbum",
+    ]
+    indexed = list(enumerate(selected, 1))
+    if not full and len(indexed) > edge_entries * 2:
+        visible = indexed[:edge_entries] + indexed[-edge_entries:]
+        omitted_at = edge_entries
+    else:
+        visible = indexed
+        omitted_at = -1
+    for position, (index, song) in enumerate(visible):
+        if position == omitted_at:
+            lines.append(f"… {len(indexed) - edge_entries * 2} canciones omitidas …")
+        lines.append(f"{index}. {format_song(song)}")
+    return "\n".join(lines)
+
+
+def _different_selection(
+    candidates: list[Song],
+    previous: list[Song],
+    max_size_bytes: int,
+    max_per_album: int,
+    rng: random.Random,
+) -> list[Song]:
+    """Retry a few unbiased shuffles when an alternative ordering exists."""
+    result = previous
+    for _ in range(8):
+        result = select_balanced(candidates, max_size_bytes, max_per_album, rng)
+        if result != previous or len(candidates) < 2:
+            break
+    return result
+
+
 def _validate_year(
     year: int | None,
     available_min: int | None,
@@ -281,6 +337,8 @@ def run_interactive(
     max_per_album: int,
     destination: Path,
     seed: int | None,
+    surprise: bool = False,
+    preview_entries: int = 5,
 ) -> tuple[str, list[Song]] | None:
     artists = sorted(
         deduplicate_display_values(value for song in songs for value in song.artist),
@@ -295,16 +353,21 @@ def run_interactive(
     available_max = max(years) if years else None
     year_text = f"{available_min}-{available_max}" if years else "sin años válidos"
     print_formatted_text(HTML("<b>¡Creemos una playlist!</b>"))
-    print(
-        f"\nEncontrados:\n- {len(artists)} artistas\n- {len(genres)} géneros\n"
-        f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
-    )
+    if surprise:
+        print("\nModo sorpresa activo: el contenido permanecerá oculto hasta crear la playlist.\n")
+    else:
+        print(
+            f"\nEncontrados:\n- {len(artists)} artistas\n- {len(genres)} géneros\n"
+            f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
+        )
     print(
         "Usa + para incluir, - para excluir, Tab para coincidencias, "
         "Enter para aceptar y Esc para volver.\n"
     )
 
     state = UIState()
+    session_rng = random.Random() if seed is None else random.Random(seed)
+    candidates: list[Song] = []
     screen = 0
     while True:
         if screen == 0:
@@ -348,26 +411,91 @@ def run_interactive(
                     available_min,
                     available_max,
                 )
+                state.selected = []
                 screen = 4
             except ValueError as exc:
                 print(f"Valor no válido: {exc}")
         elif screen == 4:
+            spec = _to_filter_spec(state)
+            candidates = filter_songs(songs, spec)
+            if not state.selected:
+                state.selected = select_balanced(
+                    candidates,
+                    max_size_bytes,
+                    max_per_album,
+                    seed if seed is not None else session_rng,
+                )
+            if not state.selected:
+                choice = (
+                    _simple_prompt("No hay canciones seleccionables. [f]iltros / [c]ancelar: ")
+                    .strip()
+                    .casefold()
+                )
+                if choice == "c":
+                    return None
+                if choice in {"f", BACK}:
+                    screen = 3
+                continue
+            if surprise:
+                screen = 5
+                continue
+            print(
+                format_preview(
+                    state.selected,
+                    max_size_bytes=max_size_bytes,
+                    max_per_album=max_per_album,
+                    edge_entries=preview_entries,
+                )
+            )
+            choice = (
+                _simple_prompt("[a]ceptar resultado / [r]ehacer / [v]er completa / [c]ancelar: ")
+                .strip()
+                .casefold()
+            )
+            if choice == "a":
+                screen = 5
+            elif choice == "v":
+                print(
+                    format_preview(
+                        state.selected,
+                        max_size_bytes=max_size_bytes,
+                        max_per_album=max_per_album,
+                        edge_entries=preview_entries,
+                        full=True,
+                    )
+                )
+            elif choice == "r":
+                if seed is not None:
+                    print("La selección está fijada por --seed; no se cambiará silenciosamente.")
+                    action = _simple_prompt("[f]iltros / [c]ancelar: ").strip().casefold()
+                    if action == "c":
+                        return None
+                    if action in {"f", BACK}:
+                        screen = 3
+                else:
+                    state.selected = _different_selection(
+                        candidates,
+                        state.selected,
+                        max_size_bytes,
+                        max_per_album,
+                        session_rng,
+                    )
+            elif choice == "c":
+                return None
+        elif screen == 5:
             result = _simple_prompt("¿Qué nombre le damos a la playlist? ", state.playlist_name)
             if result == BACK:
-                screen = 3
+                screen = 4
                 continue
             try:
                 requested = sanitize_playlist_name(result)
                 state.playlist_name = available_playlist_name(destination, requested)
                 if state.playlist_name != requested:
                     print(f"Ya existía; se usará: {state.playlist_name}")
-                screen = 5
+                screen = 6
             except ValueError as exc:
                 print(f"Nombre no válido: {exc}")
         else:
-            spec = _to_filter_spec(state)
-            candidates = filter_songs(songs, spec)
-            selected = select_balanced(candidates, max_size_bytes, max_per_album, seed)
             print("\nResumen")
             print(f"Artistas incluidos: {', '.join(state.artists.included) or 'cualquiera'}")
             print(f"Artistas excluidos: {', '.join(state.artists.excluded) or 'ninguno'}")
@@ -380,27 +508,19 @@ def run_interactive(
             print(f"Tamaño máximo: {_format_mb(max_size_bytes)}")
             print(f"Máximo por álbum: {max_per_album}")
             print(f"Destino: {destination}")
-            candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
-            selected_size = _format_mb(sum(song.size_bytes for song in selected))
-            print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
-            print(f"Canciones que entrarán: {len(selected)} ({selected_size})")
-            if not selected:
-                choice = (
-                    _simple_prompt("No hay canciones seleccionables. [v]olver / [c]ancelar: ")
-                    .strip()
-                    .casefold()
-                )
-                if choice == "v" or choice == BACK:
-                    screen = 4
-                elif choice == "c":
-                    return None
-                continue
+            if surprise:
+                print("Modo sorpresa activo: composición oculta")
+            else:
+                candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
+                selected_size = _format_mb(sum(song.size_bytes for song in state.selected))
+                print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
+                print(f"Canciones que entrarán: {len(state.selected)} ({selected_size})")
             choice = (
                 _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ").strip().casefold()
             )
             if choice == "s":
-                return state.playlist_name, selected
+                return state.playlist_name, state.selected
             if choice == "v" or choice == BACK:
-                screen = 4
+                screen = 5
             elif choice == "c":
                 return None

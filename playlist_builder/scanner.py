@@ -4,10 +4,17 @@ import logging
 import os
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .cache import CacheEntry, load_cache, write_cache
+from .cache import (
+    CacheEntry,
+    CacheHealth,
+    CatalogCache,
+    load_catalog_cache,
+    utc_now,
+    write_catalog_cache,
+)
 from .config import Settings, load_config
 from .metadata import read_song
 from .models import AuditIssue, AuditReport, Song
@@ -51,11 +58,7 @@ def _discover_audio_files(
     def record_walk_error(exc: OSError) -> None:
         problem = Path(exc.filename) if exc.filename else root
         report.issues.append(
-            AuditIssue(
-                _error_path(problem, root),
-                error=f"OSError: {exc}",
-                is_directory=True,
-            )
+            AuditIssue(_error_path(problem, root), error=f"OSError: {exc}", is_directory=True)
         )
         LOGGER.warning("No se pudo recorrer %s: %s", problem, exc)
 
@@ -78,11 +81,7 @@ def _discover_audio_files(
                 resolved = child.resolve()
             except (OSError, RuntimeError) as exc:
                 report.issues.append(
-                    AuditIssue(
-                        relative,
-                        error=f"{type(exc).__name__}: {exc}",
-                        is_directory=True,
-                    )
+                    AuditIssue(relative, error=f"{type(exc).__name__}: {exc}", is_directory=True)
                 )
                 LOGGER.warning("No se pudo resolver %s: %s", child, exc)
                 continue
@@ -112,6 +111,20 @@ def _discover_audio_files(
     return paths, file_errors
 
 
+def _error_retry_due(entry: CacheEntry, now: datetime, days: float) -> bool:
+    if not entry.error:
+        return False
+    if not entry.error_at:
+        return True
+    try:
+        recorded = datetime.fromisoformat(entry.error_at)
+        if recorded.tzinfo is None:
+            recorded = recorded.replace(tzinfo=UTC)
+    except ValueError:
+        return True
+    return now - recorded >= timedelta(days=days)
+
+
 def scan_library(
     root: Path,
     *,
@@ -121,9 +134,18 @@ def scan_library(
     settings: Settings | None = None,
     progress: ProgressCallback | None = None,
     clock: Callable[[], float] = time.monotonic,
+    retry_error_after_days: float | None = None,
 ) -> tuple[list[Song], AuditReport]:
     started_at = clock()
     settings = settings or load_config()
+    retry_days = (
+        settings.retry_error_after_days
+        if retry_error_after_days is None
+        else retry_error_after_days
+    )
+    if retry_days < 0:
+        raise ValueError("retry_error_after_days no puede ser negativo")
+
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"La raíz musical no existe o no es un directorio: {root}")
@@ -133,7 +155,23 @@ def scan_library(
         f"year={datetime.now().year};min={settings.min_reasonable_year};"
         f"offset={settings.max_reasonable_year_offset}"
     )
-    old_cache = {} if rescan else load_cache(cache_path, root, metadata_signature)
+    loaded = CatalogCache() if rescan else load_catalog_cache(cache_path, root, metadata_signature)
+    old_cache = loaded.files
+    started = utc_now()
+    # Mark the catalog incomplete before discovery so an abrupt stop cannot legitimize old state.
+    incomplete = CacheHealth(
+        started,
+        None,
+        False,
+        loaded.health.last_read_at,
+        dict(loaded.health.errors),
+    )
+    write_catalog_cache(
+        cache_path,
+        CatalogCache(dict(old_cache), incomplete),
+        metadata_signature,
+    )
+
     new_cache: dict[str, CacheEntry] = {}
     songs: list[Song] = []
     report = AuditReport()
@@ -141,10 +179,7 @@ def scan_library(
     if progress is not None:
         progress(ScanProgress(phase="discovery_started"))
     paths, discovery_file_errors = _discover_audio_files(
-        root,
-        excluded,
-        settings.audio_extensions,
-        report,
+        root, excluded, settings.audio_extensions, report
     )
     report.total_audio_files = len(paths) + discovery_file_errors
     if progress is not None:
@@ -152,6 +187,7 @@ def scan_library(
 
     cached_count = 0
     error_count = discovery_file_errors
+    now = datetime.now(UTC)
     for processed_count, path in enumerate(paths, start=discovery_file_errors + 1):
         try:
             relative = path.relative_to(root)
@@ -175,10 +211,14 @@ def scan_library(
             continue
 
         key = relative.as_posix()
-
         cached = old_cache.get(key)
-        if cached and cached.size == stat.st_size and cached.mtime_ns == stat.st_mtime_ns:
-            song, error = cached.song, cached.error
+        unchanged = (
+            cached is not None
+            and cached.size == stat.st_size
+            and cached.mtime_ns == stat.st_mtime_ns
+        )
+        if cached is not None and unchanged and not _error_retry_due(cached, now, retry_days):
+            song, error, error_at = cached.song, cached.error, cached.error_at
             cached_count += 1
             LOGGER.debug("Caché válida: %s", relative)
         else:
@@ -192,14 +232,15 @@ def scan_library(
                     )
                 else:
                     song = metadata_reader(path, root)
-                error = None
+                error = error_at = None
                 LOGGER.debug("Metadatos leídos: %s", relative)
             except Exception as exc:
                 song = None
                 error = f"{type(exc).__name__}: {exc}"
+                error_at = utc_now()
                 LOGGER.warning("No se pudieron leer metadatos de %s: %s", relative, exc)
 
-        new_cache[key] = CacheEntry(stat.st_size, stat.st_mtime_ns, song, error)
+        new_cache[key] = CacheEntry(stat.st_size, stat.st_mtime_ns, song, error, error_at)
         if song is None:
             report.issues.append(AuditIssue(relative, error=error or "error desconocido"))
             error_count += 1
@@ -233,7 +274,17 @@ def scan_library(
                 )
             )
 
-    write_cache(cache_path, new_cache, metadata_signature)
+    health_errors = {
+        issue.relative_path.as_posix(): issue.error
+        for issue in report.issues
+        if issue.error is not None
+    }
+    complete = CacheHealth(started, utc_now(), True, loaded.health.last_read_at, health_errors)
+    write_catalog_cache(
+        cache_path,
+        CatalogCache(new_cache, complete),
+        metadata_signature,
+    )
     if progress is not None:
         progress(
             ScanProgress(

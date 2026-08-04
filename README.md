@@ -236,8 +236,11 @@ exclusivamente los archivos y directorios creados por esa operación; nunca se b
 preexistentes. Una copia idéntica se reutiliza y una colisión distinta recibe un sufijo incremental.
 
 Si el destino se encuentra dentro de la discoteca, su carpeta `Music/` se excluye del escaneo de esa
-ejecución. La exportación incluye un marcador interno para que también se excluya automáticamente en
-ejecuciones posteriores. Los archivos originales nunca se modifican.
+ejecución. La exportación incluye el marcador interno `Music/.playlist-builder-copy-root` para que
+también se excluya automáticamente en ejecuciones posteriores; con `--verbose` se informa de cada
+carpeta omitida por este motivo. Para volver a incluir esa carpeta en el escaneo (por ejemplo, si se
+reutiliza para música real) basta con eliminar ese archivo oculto. Los archivos originales nunca se
+modifican.
 
 ## Auditoría
 

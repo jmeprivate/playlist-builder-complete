@@ -8,15 +8,13 @@ import tempfile
 from contextlib import suppress
 from pathlib import Path
 
+from .config import COPY_ROOT_MARKER
 from .m3u import write_m3u_atomic
 from .models import CopyResult, Song
 
 
 class CopyTransactionError(RuntimeError):
     pass
-
-
-COPY_ROOT_MARKER = ".playlist-builder-copy-root"
 
 
 def _collision_free_target(

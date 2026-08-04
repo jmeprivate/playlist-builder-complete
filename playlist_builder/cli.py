@@ -305,6 +305,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.force and not args.save_profile:
             raise ValueError("--force solo puede usarse junto con --save-profile")
+        copy_structure_given = any(
+            item == "--copy-structure" or item.startswith("--copy-structure=")
+            for item in raw_args
+        )
+        if copy_structure_given and not args.copy:
+            raise ValueError("--copy-structure solo puede usarse junto con --copy")
         if args.profile:
             validate_name(args.profile)
         if args.save_profile:

@@ -19,7 +19,7 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
-from prompt_toolkit.shortcuts import confirm, print_formatted_text
+from prompt_toolkit.shortcuts import clear, confirm, print_formatted_text
 
 from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
 from .filters import complete_year_range, filter_songs
@@ -28,6 +28,7 @@ from .normalization import deduplicate_display_values, normalize_for_search
 from .selector import select_balanced
 
 BACK = "__BACK__"
+NoticeLevel = Literal["info", "warning", "error"]
 
 
 @dataclass(slots=True)
@@ -48,7 +49,7 @@ class SelectionState:
         self.history = [(op, item) for op, item in self.history if item != value]
         own.append(value)
         self.history.append((operation, value))
-        self.notice = f"{value} movido a la última operación." if moved else ""
+        self.notice = f"{value} se movió a la última operación." if moved else f"Añadido: {value}"
 
     def undo(self) -> None:
         if not self.history:
@@ -59,6 +60,11 @@ class SelectionState:
         if value in target:
             target.remove(value)
         self.notice = f"Eliminado: {value}"
+
+    def take_notice(self) -> str:
+        notice = self.notice
+        self.notice = ""
+        return notice
 
 
 @dataclass(slots=True)
@@ -107,6 +113,35 @@ class FirstMatchSuggestion(AutoSuggest):
         return None
 
 
+def _show_notice(message: str, level: NoticeLevel = "warning") -> None:
+    style = {"info": "ansicyan", "warning": "ansiyellow", "error": "ansired"}[level]
+    print_formatted_text(HTML(f"<{style}>{escape_html(message)}</{style}>"))
+    print()
+
+
+def _selection_toolbar(state: SelectionState, completer: SubstringCompleter) -> HTML:
+    if state.notice:
+        return HTML(f"<ansiyellow>{escape_html(state.notice)}</ansiyellow>")
+    text = get_app().current_buffer.text
+    if not text:
+        return HTML(
+            "<dim>+ incluir · - excluir · Enter continuar · Esc volver · Backspace deshacer</dim>"
+        )
+    if text[:1] not in {"+", "-"}:
+        return HTML("<ansired>Empieza con + para incluir o - para excluir.</ansired>")
+    if len(text) == 1:
+        action = "incluir" if text == "+" else "excluir"
+        return HTML(f"<dim>Escribe para {action}; Tab recorre las coincidencias.</dim>")
+    matches = completer.matches(text)
+    if not matches:
+        return HTML("<ansired>No hay coincidencias. Corrige el texto o pulsa Esc.</ansired>")
+    return HTML(
+        f"<ansicyan>{len(matches)} coincidencia(s)</ansicyan> · "
+        f"<b>{escape_html(matches[0])}</b> · "
+        "<dim>Tab/Shift+Tab para recorrer, Enter para aceptar</dim>"
+    )
+
+
 def _selection_bindings(state: SelectionState, completer: SubstringCompleter) -> KeyBindings:
     bindings = KeyBindings()
 
@@ -122,6 +157,10 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
             get_app().invalidate()
             return
         query = text[1:].strip()
+        if not query:
+            state.notice = "Escribe un nombre antes de confirmar."
+            get_app().invalidate()
+            return
         matches = completer.matches(text)
         exact = next(
             (
@@ -142,8 +181,9 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
     def escape(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
         if buffer.text:
-            buffer.text = ""
+            buffer.reset()
             state.notice = "Búsqueda parcial cancelada."
+            get_app().invalidate()
         else:
             get_app().exit(result=BACK)
 
@@ -152,27 +192,37 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
         buffer = event.current_buffer
         if buffer.text:
             buffer.delete_before_cursor(count=1)
+            state.notice = ""
         else:
             state.undo()
             get_app().invalidate()
+
+    @bindings.add("<any>")
+    def insert_text(event: KeyPressEvent) -> None:
+        state.notice = ""
+        event.current_buffer.insert_text(event.data)
 
     return bindings
 
 
 def _show_selections(label: str, state: SelectionState) -> None:
-    print_formatted_text(HTML(f"<b>{escape_html(label)}</b>"))
-    included = escape_html(", ".join(state.included) or "—")
-    excluded = escape_html(", ".join(state.excluded) or "—")
-    print_formatted_text(HTML(f"  <ansigreen>Incluidos: {included}</ansigreen>"))
-    print_formatted_text(HTML(f"  <ansired>Excluidos: {excluded}</ansired>"))
-    if state.notice:
-        print_formatted_text(HTML(f"  <ansiyellow>{escape_html(state.notice)}</ansiyellow>"))
+    print_formatted_text(HTML(f"<b><ansicyan>{escape_html(label)}</ansicyan></b>"))
+    print("─" * 72)
+    included = escape_html(", ".join(state.included) or "ninguno")
+    excluded = escape_html(", ".join(state.excluded) or "ninguno")
+    print_formatted_text(HTML(f"<ansigreen>  + Incluidos: {included}</ansigreen>"))
+    print_formatted_text(HTML(f"<ansired>  - Excluidos: {excluded}</ansired>"))
+    print()
 
 
 def select_values(label: str, options: list[str], state: SelectionState) -> str:
     completer = SubstringCompleter(options)
     while True:
+        clear()
         _show_selections(label, state)
+        previous_notice = state.take_notice()
+        if previous_notice:
+            _show_notice(previous_notice)
         session: PromptSession[str] = PromptSession(
             completer=completer,
             complete_while_typing=True,
@@ -180,12 +230,9 @@ def select_values(label: str, options: list[str], state: SelectionState) -> str:
             key_bindings=_selection_bindings(state, completer),
         )
         result = session.prompt(
-            "+ incluir / - excluir (Enter vacío: continuar): ",
-            bottom_toolbar=(
-                "Tab/Shift+Tab: coincidencias · Esc: cancelar/volver · Backspace vacío: deshacer"
-            ),
+            "+/- búsqueda: ",
+            bottom_toolbar=lambda: _selection_toolbar(state, completer),
         )
-        state.notice = ""
         if result in {"", BACK}:
             return result
         state.add(result[0], result[1:])  # type: ignore[arg-type]
@@ -198,11 +245,19 @@ def _simple_prompt(message: str, default: str = "") -> str:
     def escape(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
         if buffer.text:
-            buffer.text = ""
+            buffer.reset()
         else:
             get_app().exit(result=BACK)
 
-    return PromptSession[str](key_bindings=bindings).prompt(message, default=default)
+    return PromptSession[str](key_bindings=bindings).prompt(
+        message,
+        default=default,
+        bottom_toolbar="Esc borra la entrada; Esc de nuevo vuelve a la pantalla anterior",
+    )
+
+
+def _normalize_choice(raw: str) -> str:
+    return BACK if raw == BACK else raw.strip().casefold()
 
 
 def sanitize_playlist_name(value: str, platform: str | None = None) -> str:
@@ -437,10 +492,8 @@ def run_interactive(
                     seed if seed is not None else session_rng,
                 )
             if not state.selected:
-                choice = (
+                choice = _normalize_choice(
                     _simple_prompt("No hay canciones seleccionables. [f]iltros / [c]ancelar: ")
-                    .strip()
-                    .casefold()
                 )
                 if choice == "c":
                     return None
@@ -458,10 +511,8 @@ def run_interactive(
                     edge_entries=preview_entries,
                 )
             )
-            choice = (
+            choice = _normalize_choice(
                 _simple_prompt("[a]ceptar resultado / [r]ehacer / [v]er completa / [c]ancelar: ")
-                .strip()
-                .casefold()
             )
             if choice == "a":
                 screen = 6
@@ -478,7 +529,7 @@ def run_interactive(
             elif choice == "r":
                 if seed is not None:
                     print("La selección está fijada por --seed; no se cambiará silenciosamente.")
-                    action = _simple_prompt("[f]iltros / [c]ancelar: ").strip().casefold()
+                    action = _normalize_choice(_simple_prompt("[f]iltros / [c]ancelar: "))
                     if action == "c":
                         return None
                     if action in {"f", BACK}:
@@ -534,8 +585,8 @@ def run_interactive(
                 selected_size = _format_mb(sum(song.size_bytes for song in state.selected))
                 print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
                 print(f"Canciones que entrarán: {len(state.selected)} ({selected_size})")
-            choice = (
-                _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ").strip().casefold()
+            choice = _normalize_choice(
+                _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ")
             )
             if choice == "s":
                 return state.playlist_name, state.selected

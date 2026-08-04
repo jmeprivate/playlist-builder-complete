@@ -1,10 +1,16 @@
 from pathlib import Path
 
 import pytest
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.document import Document
 
 from playlist_builder.ui import (
+    BACK,
+    FirstMatchSuggestion,
     SelectionState,
+    SubstringCompleter,
     UIState,
+    _normalize_choice,
     available_playlist_name,
     format_preview,
     sanitize_playlist_name,
@@ -20,6 +26,23 @@ def test_selection_state_moves_and_undoes_last_real_operation() -> None:
     assert state.excluded == ["Talk Talk", "Björk"]
     state.undo()
     assert state.excluded == ["Talk Talk"]
+
+
+def test_selection_notice_is_consumed_once() -> None:
+    state = SelectionState()
+    state.add("+", "Björk")
+    assert state.take_notice() == "Añadido: Björk"
+    assert state.take_notice() == ""
+
+
+def test_substring_completion_and_back_sentinel() -> None:
+    completer = SubstringCompleter(["Björk", "Talking Heads", "Talk Talk"])
+    assert completer.matches("+bjork") == ["Björk"]
+    assert completer.matches("-HEADS") == ["Talking Heads"]
+    suggestion = FirstMatchSuggestion(completer).get_suggestion(Buffer(), Document("+talk"))
+    assert suggestion is not None and suggestion.text == "ing Heads"
+    assert _normalize_choice(BACK) == BACK
+    assert _normalize_choice(" V ") == "v"
 
 
 def test_playlist_filename_sanitizing_and_increment(tmp_path: Path) -> None:

@@ -55,6 +55,31 @@ def test_partial_copy_failure_publishes_nothing(
     )
 
 
+def test_keyboard_interrupt_rolls_back_files_and_new_directories(
+    tmp_path: Path,
+    song_factory: Callable[..., Song],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    songs = [song_factory(name="one.mp3"), song_factory(name="two.mp3")]
+    real_replace = copier.os.replace
+    calls = 0
+
+    def interrupting_replace(source: Path, target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        real_replace(source, target)
+
+    monkeypatch.setattr(copier.os, "replace", interrupting_replace)
+    destination = tmp_path / "export"
+    with pytest.raises(KeyboardInterrupt):
+        copy_and_write_playlist(destination, "Interrupted.m3u", songs)
+    assert not (destination / "Interrupted.m3u").exists()
+    assert not list(destination.rglob("*.mp3"))
+    assert not list(destination.glob(".playlist-copy-*"))
+
+
 def test_surprise_copy_uses_playlist_name_unicode_and_final_collision_paths(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:

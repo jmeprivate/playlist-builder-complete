@@ -2,12 +2,45 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from mutagen import MutagenError
 
+from playlist_builder import cache, scanner
 from playlist_builder.cache import CacheEntry, load_cache, write_cache
 from playlist_builder.config import CACHE_FILENAME
 from playlist_builder.models import Song
 from playlist_builder.scanner import scan_library
+
+
+def test_cache_interrupt_removes_temporary_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "cache.json"
+    monkeypatch.setattr(cache.os, "replace", lambda *args: (_ for _ in ()).throw(KeyboardInterrupt))
+    with pytest.raises(KeyboardInterrupt):
+        write_cache(target, {})
+    assert not list(tmp_path.glob(".cache.json.*"))
+
+
+def test_directory_walk_errors_are_reported_but_not_counted_as_audio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "library"
+    blocked = root / "blocked"
+    root.mkdir()
+
+    def broken_walk(path: Path, *, topdown: bool, onerror):  # type: ignore[no-untyped-def]
+        onerror(PermissionError(13, "denegado", str(blocked)))
+        return iter(())
+
+    monkeypatch.setattr(scanner.os, "walk", broken_walk)
+    songs, report = scan_library(root)
+    assert songs == []
+    assert report.total_audio_files == 0
+    assert report.unreadable_count == 0
+    assert report.issues[0].is_directory is True
 
 
 def test_cache_valid_stale_removed_and_corrupt(
@@ -37,16 +70,38 @@ def test_cache_valid_stale_removed_and_corrupt(
     assert len(songs) == 1 and len(calls) == 1
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 1
-    audio.write_bytes(b"changed-size")
+    cache_path = root / CACHE_FILENAME
+    cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    cache["files"]["Artist/Album/one.mp3"]["size"] += 1
+    cache_path.write_text(json.dumps(cache), encoding="utf-8")
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 2
+    audio.write_bytes(b"changed-size")
+    scan_library(root, metadata_reader=reader)
+    assert len(calls) == 3
     audio.unlink()
     scan_library(root, metadata_reader=reader)
     assert "one.mp3" not in (root / CACHE_FILENAME).read_text(encoding="utf-8")
     (root / CACHE_FILENAME).write_text("{broken", encoding="utf-8")
     audio.write_bytes(b"new")
     scan_library(root, metadata_reader=reader)
-    assert len(calls) == 3
+    assert len(calls) == 4
+
+
+def test_scan_isolates_unexpected_reader_errors(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    for name in ("one.mp3", "two.mp3"):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"audio")
+
+    def broken_reader(path: Path, music_root: Path) -> Song:
+        raise RuntimeError(f"fallo inesperado: {path.name}")
+
+    songs, report = scan_library(root, metadata_reader=broken_reader)
+    assert songs == []
+    assert report.total_audio_files == 2
+    assert report.unreadable_count == 2
 
 
 def test_scan_excludes_copy_tree_and_continues_after_mutagen_error(tmp_path: Path) -> None:

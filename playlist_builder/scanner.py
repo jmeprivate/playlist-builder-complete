@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-
-from mutagen import MutagenError
 
 from .cache import CacheEntry, load_cache, write_cache
 from .config import Settings, load_config
@@ -30,6 +29,87 @@ def _is_inside(path: Path, parent: Path | None) -> bool:
 
 def _is_stale_copy_stage(relative: Path) -> bool:
     return any(part.startswith(".playlist-copy-") for part in relative.parts)
+
+
+def _error_path(path: str | Path, root: Path) -> Path:
+    candidate = Path(path)
+    try:
+        return candidate.relative_to(root)
+    except ValueError:
+        return Path(candidate.name or ".")
+
+
+def _discover_audio_files(
+    root: Path,
+    excluded: Path | None,
+    extensions: frozenset[str],
+    report: AuditReport,
+) -> tuple[list[Path], int]:
+    paths: list[Path] = []
+    file_errors = 0
+
+    def record_walk_error(exc: OSError) -> None:
+        problem = Path(exc.filename) if exc.filename else root
+        report.issues.append(
+            AuditIssue(
+                _error_path(problem, root),
+                error=f"OSError: {exc}",
+                is_directory=True,
+            )
+        )
+        LOGGER.warning("No se pudo recorrer %s: %s", problem, exc)
+
+    for directory, dirnames, filenames in os.walk(root, topdown=True, onerror=record_walk_error):
+        current = Path(directory)
+        try:
+            current_relative = current.relative_to(root)
+        except ValueError as exc:
+            report.issues.append(
+                AuditIssue(Path(current.name), error=f"ValueError: {exc}", is_directory=True)
+            )
+            dirnames[:] = []
+            continue
+
+        kept_directories: list[str] = []
+        for dirname in sorted(dirnames, key=lambda value: (value.casefold(), value)):
+            child = current / dirname
+            relative = current_relative / dirname
+            try:
+                resolved = child.resolve()
+            except (OSError, RuntimeError) as exc:
+                report.issues.append(
+                    AuditIssue(
+                        relative,
+                        error=f"{type(exc).__name__}: {exc}",
+                        is_directory=True,
+                    )
+                )
+                LOGGER.warning("No se pudo resolver %s: %s", child, exc)
+                continue
+            if _is_inside(resolved, excluded) or _is_stale_copy_stage(relative):
+                continue
+            kept_directories.append(dirname)
+        dirnames[:] = kept_directories
+
+        for filename in sorted(filenames, key=lambda value: (value.casefold(), value)):
+            path = current / filename
+            if path.suffix.casefold() not in extensions:
+                continue
+            relative = current_relative / filename
+            try:
+                if not path.is_file():
+                    continue
+                resolved = path.resolve()
+            except (OSError, RuntimeError) as exc:
+                file_errors += 1
+                report.issues.append(AuditIssue(relative, error=f"{type(exc).__name__}: {exc}"))
+                LOGGER.warning("No se pudo inspeccionar %s: %s", path, exc)
+                continue
+            if _is_inside(resolved, excluded) or _is_stale_copy_stage(relative):
+                continue
+            paths.append(path)
+
+    return paths, file_errors
 
 
 def scan_library(
@@ -60,40 +140,32 @@ def scan_library(
 
     if progress is not None:
         progress(ScanProgress(phase="discovery_started"))
-    paths = sorted(
-        (
-            path
-            for path in root.rglob("*")
-            if path.is_file()
-            and path.suffix.casefold() in settings.audio_extensions
-            and not _is_inside(path.resolve(), excluded)
-            and not _is_stale_copy_stage(path.relative_to(root))
-        ),
-        key=lambda item: (
-            item.relative_to(root).as_posix().casefold(),
-            item.relative_to(root).as_posix(),
-        ),
+    paths, discovery_file_errors = _discover_audio_files(
+        root,
+        excluded,
+        settings.audio_extensions,
+        report,
     )
-    report.total_audio_files = len(paths)
+    report.total_audio_files = len(paths) + discovery_file_errors
     if progress is not None:
-        progress(ScanProgress(phase="discovery_complete", total=len(paths)))
+        progress(ScanProgress(phase="discovery_complete", total=report.total_audio_files))
 
     cached_count = 0
-    error_count = 0
-    for processed_count, path in enumerate(paths, start=1):
-        relative = path.relative_to(root)
-        key = relative.as_posix()
+    error_count = discovery_file_errors
+    for processed_count, path in enumerate(paths, start=discovery_file_errors + 1):
         try:
+            relative = path.relative_to(root)
             stat = path.stat()
-        except OSError as exc:
-            report.issues.append(AuditIssue(relative, error=str(exc)))
+        except (OSError, ValueError) as exc:
+            relative = _error_path(path, root)
+            report.issues.append(AuditIssue(relative, error=f"{type(exc).__name__}: {exc}"))
             error_count += 1
             if progress is not None:
                 progress(
                     ScanProgress(
                         "file_processed",
                         processed_count,
-                        len(paths),
+                        report.total_audio_files,
                         len(songs),
                         cached_count,
                         error_count,
@@ -101,6 +173,8 @@ def scan_library(
                     )
                 )
             continue
+
+        key = relative.as_posix()
 
         cached = old_cache.get(key)
         if cached and cached.size == stat.st_size and cached.mtime_ns == stat.st_mtime_ns:
@@ -120,7 +194,7 @@ def scan_library(
                     song = metadata_reader(path, root)
                 error = None
                 LOGGER.debug("Metadatos leídos: %s", relative)
-            except (OSError, ValueError, TypeError, UnicodeError, MutagenError) as exc:
+            except Exception as exc:
                 song = None
                 error = f"{type(exc).__name__}: {exc}"
                 LOGGER.warning("No se pudieron leer metadatos de %s: %s", relative, exc)
@@ -151,7 +225,7 @@ def scan_library(
                 ScanProgress(
                     "file_processed",
                     processed_count,
-                    len(paths),
+                    report.total_audio_files,
                     len(songs),
                     cached_count,
                     error_count,
@@ -164,8 +238,8 @@ def scan_library(
         progress(
             ScanProgress(
                 "complete",
-                len(paths),
-                len(paths),
+                report.total_audio_files,
+                report.total_audio_files,
                 len(songs),
                 cached_count,
                 error_count,

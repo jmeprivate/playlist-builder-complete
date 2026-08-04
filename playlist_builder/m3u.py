@@ -2,18 +2,26 @@ from __future__ import annotations
 
 import os
 import tempfile
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 
 from .models import Song
 
 
+def _safe_extinf_text(value: str) -> str:
+    cleaned = "".join(
+        " " if unicodedata.category(char) in {"Cc", "Zl", "Zp"} else char for char in value
+    )
+    return " ".join(cleaned.split())
+
+
 def _display_title(song: Song) -> str:
     if song.title and song.artist:
-        return f"{', '.join(song.artist)} - {song.title}"
+        return _safe_extinf_text(f"{', '.join(song.artist)} - {song.title}")
     if song.title:
-        return song.title
-    return song.path.stem
+        return _safe_extinf_text(song.title)
+    return _safe_extinf_text(song.path.stem)
 
 
 def render_m3u(
@@ -28,7 +36,10 @@ def render_m3u(
             entry = os.path.relpath(target, playlist_directory)
         except ValueError:
             entry = str(target)
-        lines.extend((f"#EXTINF:{duration},{_display_title(song)}", Path(entry).as_posix()))
+        portable_entry = Path(entry).as_posix()
+        if "\n" in portable_entry or "\r" in portable_entry:
+            raise ValueError(f"La ruta no se puede representar de forma segura en M3U: {target}")
+        lines.extend((f"#EXTINF:{duration},{_display_title(song)}", portable_entry))
     return "\n".join(lines) + "\n"
 
 
@@ -52,7 +63,7 @@ def write_m3u_atomic(
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-    except OSError:
+    except BaseException:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
         raise

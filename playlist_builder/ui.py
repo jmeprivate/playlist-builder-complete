@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import random
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from html import escape as escape_html
 from pathlib import Path
@@ -13,12 +13,13 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.shortcuts import clear, confirm, print_formatted_text
+from prompt_toolkit.styles import Style
 
 from .config import EMPTY_GENRE_ALIASES, GenreAliases
 from .filters import complete_year_range, filter_songs
@@ -29,17 +30,26 @@ from .profiles import FilterProfile
 from .selector import SelectionResult, select_balanced_with_stats
 
 BACK = "__BACK__"
+_REDRAW = "__REDRAW__"
 NoticeLevel = Literal["info", "warning", "error"]
+_OPERATION = Literal["+", "-"]
+_SELECTOR_STYLE = Style.from_dict(
+    {
+        "selection.include": "ansigreen",
+        "selection.exclude": "ansired",
+        "auto-suggestion": "ansibrightblack",
+    }
+)
 
 
 @dataclass(slots=True)
 class SelectionState:
     included: list[str] = field(default_factory=list)
     excluded: list[str] = field(default_factory=list)
-    history: list[tuple[Literal["+", "-"], str]] = field(default_factory=list)
+    history: list[tuple[_OPERATION, str]] = field(default_factory=list)
     notice: str = ""
 
-    def add(self, operation: Literal["+", "-"], value: str) -> None:
+    def add(self, operation: _OPERATION, value: str) -> None:
         own = self.included if operation == "+" else self.excluded
         other = self.excluded if operation == "+" else self.included
         moved = value in other
@@ -50,7 +60,7 @@ class SelectionState:
         self.history = [(op, item) for op, item in self.history if item != value]
         own.append(value)
         self.history.append((operation, value))
-        self.notice = f"{value} se movió a la última operación." if moved else f"Añadido: {value}"
+        self.notice = f"{value} se movió a la última operación." if moved else ""
 
     def undo(self) -> None:
         if not self.history:
@@ -81,37 +91,95 @@ class UIState:
     selected: list[Song] = field(default_factory=list)
 
 
-class SubstringCompleter(Completer):
-    def __init__(self, options: list[str]) -> None:
-        self.options = options
-
-    def matches(self, text: str) -> list[str]:
-        query = text[1:] if text[:1] in {"+", "-"} else text
-        normalized = normalize_for_search(query)
-        if not normalized:
-            return []
-        return [option for option in self.options if normalized in normalize_for_search(option)]
-
-    def get_completions(
-        self, document: Document, complete_event: CompleteEvent
-    ) -> Iterable[Completion]:
-        text = document.text_before_cursor
-        query = text[1:] if text[:1] in {"+", "-"} else text
-        for option in self.matches(text):
-            yield Completion(option, start_position=-len(query), display=option)
+def _prefix_matches(options: list[str], text: str) -> list[str]:
+    if text[:1] not in {"+", "-"}:
+        return []
+    query = normalize_for_search(text[1:])
+    return [option for option in options if normalize_for_search(option).startswith(query)]
 
 
-class FirstMatchSuggestion(AutoSuggest):
-    def __init__(self, completer: SubstringCompleter) -> None:
-        self.completer = completer
+def _suggested_suffix(option: str, query: str) -> str:
+    normalized_query = normalize_for_search(query)
+    if not normalized_query:
+        return option
+    for index in range(len(option) + 1):
+        if normalize_for_search(option[:index]) == normalized_query:
+            return option[index:]
+    return option[len(query) :]
+
+
+@dataclass(slots=True)
+class SelectionCursor:
+    options: list[str]
+    operation: _OPERATION | None = None
+    query: str = ""
+    matches: tuple[str, ...] = ()
+    index: int = 0
+    preselected: bool = False
+    notice: str = ""
+
+    def preselect(self, text: str) -> str | None:
+        if text[:1] not in {"+", "-"}:
+            self.notice = "Pulsa + para incluir o - para excluir."
+            return None
+        matches = tuple(_prefix_matches(self.options, text))
+        if not matches:
+            self.notice = "No hay valores que empiecen por ese texto."
+            return None
+        self.operation = "+" if text[0] == "+" else "-"
+        self.query = text[1:]
+        self.matches = matches
+        self.index = 0
+        self.preselected = True
+        self.notice = ""
+        return self.operation + self.matches[0]
+
+    def cycle(self) -> str | None:
+        if not self.preselected or self.operation is None or not self.matches:
+            return None
+        self.index = (self.index + 1) % len(self.matches)
+        return self.operation + self.matches[self.index]
+
+    def cancel(self) -> str:
+        result = (self.operation or "") + self.query
+        self.operation = None
+        self.query = ""
+        self.matches = ()
+        self.index = 0
+        self.preselected = False
+        self.notice = ""
+        return result
+
+    def accept(self) -> str | None:
+        if not self.preselected or self.operation is None or not self.matches:
+            return None
+        return self.operation + self.matches[self.index]
+
+
+class PrefixSuggestion(AutoSuggest):
+    def __init__(self, cursor: SelectionCursor) -> None:
+        self.cursor = cursor
 
     def get_suggestion(self, buffer: Buffer, document: Document) -> Suggestion | None:
+        if self.cursor.preselected:
+            return None
         text = document.text_before_cursor
-        query = text[1:] if text[:1] in {"+", "-"} else text
-        matches = self.completer.matches(text)
-        if matches and normalize_for_search(matches[0]).startswith(normalize_for_search(query)):
-            return Suggestion(matches[0][len(query) :])
-        return None
+        matches = _prefix_matches(self.cursor.options, text)
+        if not matches:
+            return None
+        return Suggestion(_suggested_suffix(matches[0], text[1:]))
+
+
+class OperationLexer(Lexer):
+    def lex_document(self, document: Document):  # type: ignore[no-untyped-def]
+        text = document.text
+        if text.startswith("+"):
+            style = "class:selection.include"
+        elif text.startswith("-"):
+            style = "class:selection.exclude"
+        else:
+            style = ""
+        return lambda _line: [(style, text)]
 
 
 def _show_notice(message: str, level: NoticeLevel = "warning") -> None:
@@ -120,70 +188,61 @@ def _show_notice(message: str, level: NoticeLevel = "warning") -> None:
     print()
 
 
-def _selection_toolbar(state: SelectionState, completer: SubstringCompleter) -> HTML:
-    if state.notice:
-        return HTML(f"<ansiyellow>{escape_html(state.notice)}</ansiyellow>")
+def _selection_toolbar(cursor: SelectionCursor) -> HTML:
+    if cursor.notice:
+        return HTML(f"<ansiyellow>{escape_html(cursor.notice)}</ansiyellow>")
+    if cursor.preselected:
+        return HTML(
+            "<dim>Enter acepta · Tab muestra el siguiente · Esc quita la preselección</dim>"
+        )
     text = get_app().current_buffer.text
     if not text:
         return HTML(
-            "<dim>+ incluir · - excluir · Enter continuar · Esc volver · Backspace deshacer</dim>"
+            "<dim><ansigreen>+ incluir</ansigreen> · <ansired>- excluir</ansired> · "
+            "Enter todos · Esc volver · Backspace deshacer</dim>"
         )
-    if text[:1] not in {"+", "-"}:
-        return HTML("<ansired>Empieza con + para incluir o - para excluir.</ansired>")
-    if len(text) == 1:
-        action = "incluir" if text == "+" else "excluir"
-        return HTML(f"<dim>Escribe para {action}; Tab recorre las coincidencias.</dim>")
-    matches = completer.matches(text)
+    matches = _prefix_matches(cursor.options, text)
     if not matches:
-        return HTML("<ansired>No hay coincidencias. Corrige el texto o pulsa Esc.</ansired>")
-    return HTML(
-        f"<ansicyan>{len(matches)} coincidencia(s)</ansicyan> · "
-        f"<b>{escape_html(matches[0])}</b> · "
-        "<dim>Tab/Shift+Tab para recorrer, Enter para aceptar</dim>"
-    )
+        return HTML("<ansired>No hay valores que empiecen por ese texto.</ansired>")
+    return HTML("<dim>Enter o Tab preselecciona · Esc vuelve</dim>")
 
 
-def _selection_bindings(state: SelectionState, completer: SubstringCompleter) -> KeyBindings:
+def _set_buffer_text(buffer: Buffer, text: str) -> None:
+    buffer.text = text
+    buffer.cursor_position = len(text)
+
+
+def _selection_bindings(state: SelectionState, cursor: SelectionCursor) -> KeyBindings:
     bindings = KeyBindings()
 
     @bindings.add("enter")
-    def accept(event: KeyPressEvent) -> None:
+    def enter(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
-        text = buffer.text
-        if not text:
+        if cursor.preselected:
+            result = cursor.accept()
+            if result is not None:
+                get_app().exit(result=result)
+            return
+        if not buffer.text:
             get_app().exit(result="")
             return
-        if text[:1] not in {"+", "-"}:
-            state.notice = "Empieza con + para incluir o - para excluir."
-            get_app().invalidate()
-            return
-        query = text[1:].strip()
-        if not query:
-            state.notice = "Escribe un nombre antes de confirmar."
-            get_app().invalidate()
-            return
-        matches = completer.matches(text)
-        exact = next(
-            (
-                item
-                for item in completer.options
-                if normalize_for_search(item) == normalize_for_search(query)
-            ),
-            None,
-        )
-        chosen = exact or (matches[0] if matches else None)
-        if chosen is None:
-            state.notice = "No existe una opción válida con ese texto."
-            get_app().invalidate()
-            return
-        get_app().exit(result=text[0] + chosen)
+        result = cursor.preselect(buffer.text)
+        if result is not None:
+            _set_buffer_text(buffer, result)
+        get_app().invalidate()
+
+    @bindings.add("tab")
+    def tab(event: KeyPressEvent) -> None:
+        buffer = event.current_buffer
+        result = cursor.cycle() if cursor.preselected else cursor.preselect(buffer.text)
+        if result is not None:
+            _set_buffer_text(buffer, result)
+        get_app().invalidate()
 
     @bindings.add("escape")
     def escape(event: KeyPressEvent) -> None:
-        buffer = event.current_buffer
-        if buffer.text:
-            buffer.reset()
-            state.notice = "Búsqueda parcial cancelada."
+        if cursor.preselected:
+            _set_buffer_text(event.current_buffer, cursor.cancel())
             get_app().invalidate()
         else:
             get_app().exit(result=BACK)
@@ -191,17 +250,33 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
     @bindings.add("backspace")
     def backspace(event: KeyPressEvent) -> None:
         buffer = event.current_buffer
-        if buffer.text:
+        if cursor.preselected:
+            _set_buffer_text(buffer, cursor.cancel())
+            get_app().invalidate()
+        elif buffer.text:
             buffer.delete_before_cursor(count=1)
-            state.notice = ""
+            cursor.notice = ""
         else:
             state.undo()
-            get_app().invalidate()
+            get_app().exit(result=_REDRAW)
 
     @bindings.add("<any>")
     def insert_text(event: KeyPressEvent) -> None:
-        state.notice = ""
-        event.current_buffer.insert_text(event.data)
+        buffer = event.current_buffer
+        if cursor.preselected:
+            cursor.notice = "Enter acepta, Tab cambia y Esc quita la preselección."
+        elif not buffer.text:
+            if event.data in {"+", "-"}:
+                buffer.insert_text(event.data)
+                cursor.notice = ""
+            else:
+                cursor.notice = "Pulsa + para incluir o - para excluir."
+        elif buffer.text[:1] in {"+", "-"}:
+            buffer.insert_text(event.data)
+            cursor.notice = ""
+        else:
+            cursor.notice = "Pulsa + para incluir o - para excluir."
+        get_app().invalidate()
 
     return bindings
 
@@ -209,34 +284,35 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
 def _show_selections(label: str, state: SelectionState) -> None:
     print_formatted_text(HTML(f"<b><ansicyan>{escape_html(label)}</ansicyan></b>"))
     print("─" * 72)
-    included = escape_html(", ".join(state.included) or "ninguno")
-    excluded = escape_html(", ".join(state.excluded) or "ninguno")
-    print_formatted_text(HTML(f"<ansigreen>  + Incluidos: {included}</ansigreen>"))
-    print_formatted_text(HTML(f"<ansired>  - Excluidos: {excluded}</ansired>"))
+    if not state.history:
+        print_formatted_text(HTML("<ansibrightblack>Enter sin elegir = todos</ansibrightblack>"))
+    else:
+        for operation, value in state.history:
+            color = "ansigreen" if operation == "+" else "ansired"
+            print_formatted_text(HTML(f"<{color}>{operation} {escape_html(value)}</{color}>"))
     print()
 
 
 def select_values(label: str, options: list[str], state: SelectionState) -> str:
-    completer = SubstringCompleter(options)
     while True:
         clear()
         _show_selections(label, state)
         previous_notice = state.take_notice()
         if previous_notice:
             _show_notice(previous_notice)
-        session: PromptSession[str] = PromptSession(
-            completer=completer,
-            complete_while_typing=True,
-            auto_suggest=FirstMatchSuggestion(completer),
-            key_bindings=_selection_bindings(state, completer),
-        )
-        result = session.prompt(
-            "+/- búsqueda: ",
-            bottom_toolbar=lambda: _selection_toolbar(state, completer),
-        )
+        cursor = SelectionCursor(options)
+        result = PromptSession[str](
+            auto_suggest=PrefixSuggestion(cursor),
+            lexer=OperationLexer(),
+            key_bindings=_selection_bindings(state, cursor),
+            style=_SELECTOR_STYLE,
+        ).prompt("", bottom_toolbar=lambda: _selection_toolbar(cursor))
         if result in {"", BACK}:
             return result
-        state.add(result[0], result[1:])  # type: ignore[arg-type]
+        if result == _REDRAW:
+            continue
+        operation: _OPERATION = "+" if result[0] == "+" else "-"
+        state.add(operation, result[1:])
 
 
 def _simple_prompt(message: str, default: str = "") -> str:
@@ -254,6 +330,25 @@ def _simple_prompt(message: str, default: str = "") -> str:
         message,
         default=default,
         bottom_toolbar="Esc borra la entrada; Esc de nuevo vuelve a la pantalla anterior",
+    )
+
+
+def _year_prompt(label: str, available: int | None, default: int | None) -> str:
+    bindings = KeyBindings()
+
+    @bindings.add("escape")
+    def escape(_event: KeyPressEvent) -> None:
+        get_app().exit(result=BACK)
+
+    available_text = str(available) if available is not None else "sin datos"
+    message = HTML(
+        f"<b>{escape_html(label)}</b> "
+        f"<ansibrightblack>(encontrado: {escape_html(available_text)})</ansibrightblack>: "
+    )
+    return PromptSession[str](key_bindings=bindings).prompt(
+        message,
+        default=str(default) if default is not None else "",
+        bottom_toolbar="Enter vacío = todos · Esc = volver",
     )
 
 
@@ -412,8 +507,8 @@ def run_interactive(
             "hasta la reproducción.\n"
         )
     print(
-        "Usa + para incluir, - para excluir, Tab para coincidencias, "
-        "Enter para aceptar y Esc para volver.\n"
+        "Pulsa + para incluir, - para excluir, Enter para aceptar o avanzar "
+        "y Esc para volver.\n"
     )
 
     state = UIState()
@@ -462,9 +557,19 @@ def run_interactive(
             )
         )
         if profile_has_no_year_match:
+            minimum = (
+                str(initial_profile.year_min)
+                if initial_profile.year_min is not None
+                else "…"
+            )
+            maximum = (
+                str(initial_profile.year_max)
+                if initial_profile.year_max is not None
+                else "…"
+            )
             year_notice = (
                 "El perfil conserva un intervalo de años sin coincidencia actual: "
-                f"{initial_profile.year_min or '…'}-{initial_profile.year_max or '…'}"
+                f"{minimum}-{maximum}"
             )
             state.artists.notice = " ".join(filter(None, (state.artists.notice, year_notice)))
     session_rng = random.Random() if seed is None else random.Random(seed)
@@ -486,11 +591,7 @@ def run_interactive(
             result = select_values("Géneros", genres, state.genres)
             screen = 1 if result == BACK else 3
         elif screen == 3:
-            available_text = str(available_min) if available_min is not None else "—"
-            result = _simple_prompt(
-                f"Desde el año (disponible desde {available_text}): ",
-                str(state.year_min_input) if state.year_min_input is not None else "",
-            )
+            result = _year_prompt("Año mínimo", available_min, state.year_min_input)
             if result == BACK:
                 screen = 2
                 continue
@@ -500,11 +601,7 @@ def run_interactive(
             except ValueError:
                 print("Valor no válido: el año debe ser un número entero")
         elif screen == 4:
-            available_text = str(available_max) if available_max is not None else "—"
-            result = _simple_prompt(
-                f"Hasta el año (disponible hasta {available_text}): ",
-                str(state.year_max_input) if state.year_max_input is not None else "",
-            )
+            result = _year_prompt("Año máximo", available_max, state.year_max_input)
             if result == BACK:
                 screen = 3
                 continue

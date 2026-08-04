@@ -18,9 +18,18 @@ Python 3.12 o posterior en macOS, Windows 11 y Linux.
   Various Artists únicamente en «Artistas de álbum». Ambos filtros se pueden combinar.
 - Los valores múltiples de `Genre` separados por comas, punto y coma o valores nativos independientes
   se convierten en géneros separados; por ejemplo, `Jazz, Contemporary Jazz` permite buscar cualquiera.
-- La caché `.playlist_catalog.json` se guarda en la raíz musical, usa rutas relativas y compara
-  ruta, tamaño y `mtime_ns`. Incluye la firma de configuración y un digest SHA-256; una caché
-  manipulada, corrupta o incompatible se descarta. Su reemplazo es atómico.
+- La caché versionada `.playlist_catalog.json` se guarda en la raíz musical, nunca guarda rutas
+  absolutas y compara cada archivo por ruta, tamaño y `mtime_ns`. Incluye la firma de configuración
+  y un digest SHA-256; una versión incompatible, JSON truncado, manipulado o con rutas inseguras se
+  invalida por completo: la caché nunca impide escanear.
+- Cada escritura se hace mediante un temporal, `fsync` y reemplazo atómico cuando el sistema lo
+  permite. Se registra inicio, fin, lectura, estado completo y errores por ruta. Una interrupción
+  queda marcada como incompleta y conserva las entradas anteriores; solo un recorrido completo poda
+  archivos desaparecidos. Si no hay permisos de escritura, el catálogo en memoria sigue disponible
+  y `--verbose` explica el fallo.
+- No se usa el `mtime` de directorios como fuente de verdad ni se añade una base de datos: ambos
+  complicarían el diseño sin conservar la garantía por archivo en discos externos y sistemas de
+  archivos diversos.
 - Los M3U usan UTF-8, separadores `/` y saltos de línea LF. Es una combinación entendida por los
   reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos. Los controles que
   podrían inyectar líneas en `#EXTINF` se sustituyen sin eliminar marcas Unicode de formato legítimas.
@@ -52,23 +61,15 @@ python -m pip install -e ".[dev]"
 
 ## Configurar la discoteca
 
-Abra `playlist_builder/config.py` y cambie únicamente esta constante por la ruta real:
+Edite el `config.ini` del proyecto (o el indicado mediante `--config`). Además de la raíz musical y
+los valores predeterminados, `retry_error_after_days` controla cuándo se vuelven a leer los archivos
+cuyos metadatos fallaron. Un cambio de tamaño/fecha o `--rescan` siempre fuerza el reintento:
 
-```python
-MUSIC_ROOT = Path(r"/Users/usuario/Música/MiDiscoteca")
-```
-
-En Windows, por ejemplo:
-
-```python
-MUSIC_ROOT = Path(r"D:\MiDiscoteca")
-```
-
-El margen usado cuando solo se indica uno de los años también se configura allí:
-
-```python
-DEFAULT_YEAR_MARGIN = 5
-DEFAULT_MAX_ARTIST = 0  # 0 significa sin límite
+```ini
+[playlist_builder]
+music_root = /Users/usuario/Música/MiDiscoteca
+retry_error_after_days = 7
+default_max_artist = 0
 ```
 
 ## Ejecución
@@ -154,6 +155,7 @@ Las preferencias de preview y copia viven en el mismo `config.ini` que el resto 
 surprise_mode = false
 preview_entries = 5
 copy_structure = flat
+retry_error_after_days = 7
 default_max_artist = 0
 ```
 

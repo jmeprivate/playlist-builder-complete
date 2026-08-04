@@ -6,7 +6,7 @@ import pytest
 from mutagen import MutagenError
 
 from playlist_builder import cache, scanner
-from playlist_builder.cache import CacheEntry, load_cache, write_cache
+from playlist_builder.cache import CacheEntry, load_cache, load_catalog_cache, write_cache
 from playlist_builder.config import CACHE_FILENAME
 from playlist_builder.models import Song
 from playlist_builder.scanner import scan_library
@@ -158,3 +158,56 @@ def test_cache_invalidates_v1_and_deserializes_legacy_song_without_album_artists
     cached_song = loaded_new["track"].song
     assert cached_song is not None
     assert cached_song.album_artists == ("Various Artists",)
+
+
+def test_interrupted_scan_is_incomplete_and_does_not_prune(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    audio = root / "one.mp3"
+    root.mkdir()
+    audio.write_bytes(b"x")
+
+    def interrupt(_path: Path, _root: Path) -> Song:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        scan_library(root, metadata_reader=interrupt)
+    cache = load_catalog_cache(root / CACHE_FILENAME, root)
+    assert not cache.health.completed
+    assert cache.health.scan_started_at
+    assert cache.health.scan_finished_at is None
+
+
+def test_cached_error_retries_by_age_rescan_and_change(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    audio = root / "one.mp3"
+    root.mkdir()
+    audio.write_bytes(b"x")
+    calls = 0
+
+    def broken(_path: Path, _root: Path) -> Song:
+        nonlocal calls
+        calls += 1
+        raise ValueError("bad")
+
+    scan_library(root, metadata_reader=broken, retry_error_after_days=10)
+    scan_library(root, metadata_reader=broken, retry_error_after_days=10)
+    assert calls == 1
+    scan_library(root, metadata_reader=broken, retry_error_after_days=0)
+    scan_library(root, metadata_reader=broken, rescan=True, retry_error_after_days=10)
+    audio.write_bytes(b"changed")
+    scan_library(root, metadata_reader=broken, retry_error_after_days=10)
+    assert calls == 4
+
+
+def test_residual_temporary_and_write_failure_do_not_lose_memory_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "library"
+    audio = root / "one.mp3"
+    root.mkdir()
+    audio.write_bytes(b"x")
+    (root / f".{CACHE_FILENAME}.orphan").write_text("{broken", encoding="utf-8")
+    song = Song(audio, Path("one.mp3"), ("Artist",), ("Rock",), 2000, "", Path("."), 1)
+    monkeypatch.setattr("playlist_builder.scanner.write_catalog_cache", lambda *_args: False)
+    songs, _ = scan_library(root, metadata_reader=lambda *_args: song)
+    assert songs == [song]

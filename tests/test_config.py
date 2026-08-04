@@ -14,6 +14,7 @@ def write_config(path: Path, **changes: str) -> Path:
         "default_year_margin": "5",
         "default_size_mb": "8000",
         "default_max_album": "2",
+        "retry_error_after_days": "7",
         "default_max_artist": "0",
         "cache_filename": ".cache.json",
         "min_reasonable_year": "1000",
@@ -36,6 +37,7 @@ def test_load_valid_config_normalizes_values(tmp_path: Path) -> None:
     assert settings.music_root == (tmp_path / "music").resolve()
     assert settings.audio_extensions == frozenset({".mp3", ".flac", ".ape"})
     assert settings.default_size_mb == 8000
+    assert settings.retry_error_after_days == 7
     assert settings.default_max_artist == 0
     assert settings.surprise_mode is False
     assert settings.preview_entries == 5
@@ -83,6 +85,7 @@ def test_installed_default_is_copied_to_user_config(
         ({"audio_extensions": ".mp3, .MP3"}, "audio_extensions"),
         ({"surprise_mode": "perhaps"}, "surprise_mode"),
         ({"preview_entries": "0"}, "preview_entries"),
+        ({"retry_error_after_days": "-1"}, "retry_error_after_days"),
         ({"default_max_artist": "-1"}, "default_max_artist"),
         ({"copy_structure": "sideways"}, "copy_structure"),
     ],

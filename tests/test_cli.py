@@ -13,6 +13,7 @@ def _write_config(path: Path, *, surprise: bool = False) -> Path:
         "default_year_margin = 5\n"
         "default_size_mb = 8000\n"
         "default_max_album = 2\n"
+        "retry_error_after_days = 7\n"
         "default_max_artist = 0\n"
         "cache_filename = .cache.json\n"
         "min_reasonable_year = 1000\n"

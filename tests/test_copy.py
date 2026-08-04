@@ -68,7 +68,10 @@ def test_keyboard_interrupt_rolls_back_files_and_new_directories(
 def test_surprise_copy_uses_playlist_name_unicode_and_final_collision_paths(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:
-    songs = [song_factory(name="one.mp3"), song_factory(name="two.flac")]
+    songs = [
+        song_factory(name="one.mp3", title="Secret one"),
+        song_factory(name="two.flac", title="Secret two"),
+    ]
     destination = tmp_path / "export"
     conflict = destination / "Music" / "1 - Viaje agosto 🎵.mp3"
     conflict.parent.mkdir(parents=True)
@@ -79,7 +82,9 @@ def test_surprise_copy_uses_playlist_name_unicode_and_final_collision_paths(
     content = result.playlist_path.read_text(encoding="utf-8")
     assert "Music/1 - Viaje agosto 🎵 (2).mp3" in content
     assert "Music/2 - Viaje agosto 🎵.flac" in content
-    assert "Title" not in "\n".join(path.name for path in result.copied_paths.values())
+    assert "#EXTINF:123,1 - Viaje agosto 🎵.mp3" in content
+    assert "#EXTINF:123,2 - Viaje agosto 🎵.flac" in content
+    assert "Secret" not in content
 
 
 def test_normal_flat_copy_keeps_historical_name(

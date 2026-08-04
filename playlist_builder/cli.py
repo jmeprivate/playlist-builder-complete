@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from .audit import format_audit
-from .config import DEFAULT_MAX_ALBUM, DEFAULT_SIZE_MB, MUSIC_ROOT
+from .config import DEFAULT_MAX_ALBUM, DEFAULT_MAX_ARTIST, DEFAULT_SIZE_MB, MUSIC_ROOT
 from .copier import CopyTransactionError, copy_and_write_playlist
 from .m3u import write_m3u_atomic
 from .scanner import scan_library
@@ -33,6 +33,13 @@ def positive_integer(value: str) -> int:
     return number
 
 
+def optional_quota(value: str) -> int | None:
+    normalized = value.strip().casefold()
+    if normalized in {"", "0", "sin límite", "sin limite"}:
+        return None
+    return positive_integer(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Genera playlists M3U equilibradas desde una discoteca local."
@@ -50,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_ALBUM,
         metavar="N",
         help=f"máximo de canciones por álbum (por defecto: {DEFAULT_MAX_ALBUM})",
+    )
+    parser.add_argument(
+        "--max-artist",
+        type=optional_quota,
+        default=DEFAULT_MAX_ARTIST or None,
+        metavar="N",
+        help="máximo por artista de pista; 0 o 'sin límite' lo desactiva (por defecto)",
     )
     parser.add_argument("--copy", type=Path, metavar="RUTA", help="copia la selección al destino")
     parser.add_argument(
@@ -88,6 +102,7 @@ def _run(args: argparse.Namespace) -> int:
         songs,
         max_size_bytes=int(args.size * 1_000_000),
         max_per_album=args.max_album,
+        max_per_artist=args.max_artist,
         destination=destination,
         seed=args.seed,
     )

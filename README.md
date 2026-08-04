@@ -66,6 +66,7 @@ El margen usado cuando solo se indica uno de los años también se configura all
 
 ```python
 DEFAULT_YEAR_MARGIN = 5
+DEFAULT_MAX_ARTIST = 0  # 0 significa sin límite
 ```
 
 ## Ejecución
@@ -76,6 +77,7 @@ Desde la raíz del proyecto:
 python crear_playlist.py
 python crear_playlist.py --size 4000
 python crear_playlist.py --size 4000 --max-album 1
+python crear_playlist.py --max-artist 3
 python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
@@ -96,6 +98,8 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--size N`: máximo en MB decimales (`1 MB = 1_000_000 bytes`); acepta decimales y vale 8000 por
   defecto. El resultado nunca supera el límite.
 - `--max-album N`: máximo de canciones por carpeta de álbum; vale 2 por defecto.
+- `--max-artist N`: máximo de canciones por artista de pista. `0`, un valor vacío o
+  `sin límite` desactiva la cuota; está desactivada por defecto.
 - `--copy RUTA`: copia las canciones a `RUTA/Music/<ruta original>` y crea allí el M3U.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
@@ -138,6 +142,13 @@ Las candidatas se agrupan por carpeta de álbum. Las canciones y álbumes se bar
 avanza por rondas, como máximo una canción por álbum y ronda. Se respeta `--max-album`; si una pista
 no cabe se siguen probando pistas más pequeñas. Esto evita depender del orden del sistema de archivos
 y no favorece sistemáticamente los primeros artistas.
+
+La cuota opcional `--max-artist` se aplica a cada valor de `Artist`, nunca a `AlbumArtist`. Una
+colaboración consume una unidad del cupo de cada artista de pista distinto y no entra si cualquiera
+ya alcanzó el máximo. Las pistas omitidas por la cuota no detienen la ronda: se siguen probando otras
+del mismo álbum y los álbumes posteriores. El resumen muestra el límite y el número de candidatas
+omitidas por él. La cuota no cambia el orden previo ni el resultado reproducible cuando está
+desactivada.
 
 ## Copia segura
 

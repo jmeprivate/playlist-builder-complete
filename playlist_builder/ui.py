@@ -24,7 +24,7 @@ from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
 from .filters import complete_year_range, filter_songs
 from .models import FilterSpec, Song
 from .normalization import deduplicate_display_values, normalize_for_search
-from .selector import select_balanced
+from .selector import select_balanced_with_stats
 
 BACK = "__BACK__"
 
@@ -284,6 +284,7 @@ def run_interactive(
     *,
     max_size_bytes: int,
     max_per_album: int,
+    max_per_artist: int | None,
     destination: Path,
     seed: int | None,
 ) -> tuple[str, list[Song]] | None:
@@ -380,7 +381,10 @@ def run_interactive(
         else:
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
-            selected = select_balanced(candidates, max_size_bytes, max_per_album, seed)
+            selection = select_balanced_with_stats(
+                candidates, max_size_bytes, max_per_album, seed, max_per_artist
+            )
+            selected = selection.songs
             print("\nResumen")
             print(f"Artistas incluidos: {', '.join(state.artists.included) or 'cualquiera'}")
             print(f"Artistas excluidos: {', '.join(state.artists.excluded) or 'ninguno'}")
@@ -400,10 +404,15 @@ def run_interactive(
             print(f"Años: {years_summary}")
             print(f"Tamaño máximo: {_format_mb(max_size_bytes)}")
             print(f"Máximo por álbum: {max_per_album}")
+            print(f"Máximo por artista de pista: {max_per_artist or 'sin límite'}")
             print(f"Destino: {destination}")
             candidate_size = _format_mb(sum(song.size_bytes for song in candidates))
             selected_size = _format_mb(sum(song.size_bytes for song in selected))
             print(f"Canciones candidatas: {len(candidates)} ({candidate_size})")
+            if max_per_artist is not None:
+                print(
+                    f"Candidatas omitidas por cuota de artista: {selection.skipped_by_artist_quota}"
+                )
             print(f"Canciones que entrarán: {len(selected)} ({selected_size})")
             if not selected:
                 choice = (

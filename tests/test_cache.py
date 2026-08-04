@@ -72,7 +72,7 @@ def test_scan_excludes_copy_tree_and_continues_after_mutagen_error(tmp_path: Pat
     assert report.issues[0].relative_path == original.relative_to(root)
 
 
-def test_cache_loads_old_song_without_album_artists_and_round_trips_new_song(
+def test_cache_invalidates_v1_and_deserializes_legacy_song_without_album_artists(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:
     cache_path = tmp_path / "cache.json"
@@ -95,11 +95,11 @@ def test_cache_loads_old_song_without_album_artists_and_round_trips_new_song(
         ),
         encoding="utf-8",
     )
-    loaded_old = load_cache(cache_path, tmp_path)
-    assert loaded_old[song.relative_path.as_posix()].song is not None
-    assert loaded_old[song.relative_path.as_posix()].song.album_artists == ()  # type: ignore[union-attr]
+    assert load_cache(cache_path, tmp_path) == {}
+    assert Song.from_cache_dict(tmp_path, old_song).album_artists == ()
 
     write_cache(cache_path, {"track": CacheEntry(song.size_bytes, 1, song, None)})
     loaded_new = load_cache(cache_path, tmp_path)
-    assert loaded_new["track"].song is not None
-    assert loaded_new["track"].song.album_artists == ("Various Artists",)  # type: ignore[union-attr]
+    cached_song = loaded_new["track"].song
+    assert cached_song is not None
+    assert cached_song.album_artists == ("Various Artists",)

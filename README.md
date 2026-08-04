@@ -1,8 +1,8 @@
 # Playlist Builder
 
 Utilidad interactiva para escanear una discoteca organizada por carpetas, filtrar por artista de
-pista, artista de álbum, género y año, y generar una playlist M3U equilibrada. Funciona con Python 3.12 o posterior en
-macOS, Windows 11 y Linux.
+pista, artista de álbum, género y año, y generar una playlist M3U equilibrada. Funciona con
+Python 3.12 o posterior en macOS, Windows 11 y Linux.
 
 ## Decisiones y compatibilidad
 

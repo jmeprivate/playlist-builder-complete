@@ -1,8 +1,10 @@
+import json
 from collections.abc import Callable
 from pathlib import Path
 
 from mutagen import MutagenError
 
+from playlist_builder.cache import CacheEntry, load_cache, write_cache
 from playlist_builder.config import CACHE_FILENAME
 from playlist_builder.models import Song
 from playlist_builder.scanner import scan_library
@@ -68,3 +70,36 @@ def test_scan_excludes_copy_tree_and_continues_after_mutagen_error(tmp_path: Pat
     assert report.total_audio_files == 1
     assert report.unreadable_count == 1
     assert report.issues[0].relative_path == original.relative_to(root)
+
+
+def test_cache_invalidates_v1_and_deserializes_legacy_song_without_album_artists(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    song = song_factory(album_artists=("Various Artists",))
+    old_song = song.to_cache_dict()
+    old_song.pop("album_artists")
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    song.relative_path.as_posix(): {
+                        "size": song.size_bytes,
+                        "mtime_ns": 1,
+                        "song": old_song,
+                        "error": None,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_cache(cache_path, tmp_path) == {}
+    assert Song.from_cache_dict(tmp_path, old_song).album_artists == ()
+
+    write_cache(cache_path, {"track": CacheEntry(song.size_bytes, 1, song, None)})
+    loaded_new = load_cache(cache_path, tmp_path)
+    cached_song = loaded_new["track"].song
+    assert cached_song is not None
+    assert cached_song.album_artists == ("Various Artists",)

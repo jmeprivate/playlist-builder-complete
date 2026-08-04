@@ -18,6 +18,8 @@ def format_audit(report: AuditReport, mode: str) -> str:
             details: list[str] = []
             if issue.missing_tags:
                 details.append("faltan " + ", ".join(issue.missing_tags))
+            if issue.informational_tags:
+                details.append("sin " + ", ".join(issue.informational_tags) + " (informativo)")
             if issue.error:
                 details.append("error: " + issue.error)
             lines.append(f"  * {issue.relative_path.as_posix()}: {'; '.join(details)}")

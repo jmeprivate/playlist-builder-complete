@@ -27,10 +27,17 @@ def complete_year_range(
 
 def song_matches(song: Song, spec: FilterSpec) -> bool:
     artists = {normalize_for_search(value) for value in song.artist}
+    album_artists = {normalize_for_search(value) for value in song.album_artists}
     genres = {normalize_for_search(value) for value in song.genres}
-    if artists & spec.excluded_artists or genres & spec.excluded_genres:
+    if (
+        artists & spec.excluded_artists
+        or album_artists & spec.excluded_album_artists
+        or genres & spec.excluded_genres
+    ):
         return False
     if spec.included_artists and not artists & spec.included_artists:
+        return False
+    if spec.included_album_artists and not album_artists & spec.included_album_artists:
         return False
     if spec.included_genres and not genres & spec.included_genres:
         return False

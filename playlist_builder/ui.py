@@ -63,6 +63,7 @@ class SelectionState:
 @dataclass(slots=True)
 class UIState:
     artists: SelectionState = field(default_factory=SelectionState)
+    album_artists: SelectionState = field(default_factory=SelectionState)
     genres: SelectionState = field(default_factory=SelectionState)
     year_min_input: int | None = None
     year_max_input: int | None = None
@@ -204,6 +205,8 @@ def _simple_prompt(message: str, default: str = "") -> str:
 
 def sanitize_playlist_name(value: str, platform: str | None = None) -> str:
     name = value.strip()
+    if name in {"", ".", ".."}:
+        raise ValueError("el nombre de la playlist no puede estar vacío, ser '.' ni '..'")
     system = platform or os.name
     illegal = r'[<>:"/\\|?*\x00-\x1f]' if system == "nt" else r"[/\x00]"
     name = re.sub(illegal, "_", name)
@@ -246,6 +249,8 @@ def _to_filter_spec(state: UIState) -> FilterSpec:
     return FilterSpec(
         included_artists=frozenset(map(norm, state.artists.included)),
         excluded_artists=frozenset(map(norm, state.artists.excluded)),
+        included_album_artists=frozenset(map(norm, state.album_artists.included)),
+        excluded_album_artists=frozenset(map(norm, state.album_artists.excluded)),
         included_genres=frozenset(map(norm, state.genres.included)),
         excluded_genres=frozenset(map(norm, state.genres.excluded)),
         year_min=state.year_min,
@@ -286,6 +291,10 @@ def run_interactive(
         deduplicate_display_values(value for song in songs for value in song.artist),
         key=normalize_for_search,
     )
+    album_artists = sorted(
+        deduplicate_display_values(value for song in songs for value in song.album_artists),
+        key=normalize_for_search,
+    )
     genres = sorted(
         deduplicate_display_values(value for song in songs for value in song.genres),
         key=normalize_for_search,
@@ -296,7 +305,8 @@ def run_interactive(
     year_text = f"{available_min}-{available_max}" if years else "sin años válidos"
     print_formatted_text(HTML("<b>¡Creemos una playlist!</b>"))
     print(
-        f"\nEncontrados:\n- {len(artists)} artistas\n- {len(genres)} géneros\n"
+        f"\nEncontrados:\n- {len(artists)} artistas de pista\n"
+        f"- {len(album_artists)} artistas de álbum\n- {len(genres)} géneros\n"
         f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
     )
     print(
@@ -308,36 +318,39 @@ def run_interactive(
     screen = 0
     while True:
         if screen == 0:
-            result = select_values("Artistas", artists, state.artists)
+            result = select_values("Artistas de pista", artists, state.artists)
             if result == BACK:
                 if confirm("¿Salir sin crear nada?"):
                     return None
             else:
                 screen = 1
         elif screen == 1:
-            result = select_values("Géneros", genres, state.genres)
+            result = select_values("Artistas de álbum", album_artists, state.album_artists)
             screen = 0 if result == BACK else 2
         elif screen == 2:
+            result = select_values("Géneros", genres, state.genres)
+            screen = 1 if result == BACK else 3
+        elif screen == 3:
             result = _simple_prompt(
                 f"Desde el año (mín. {available_min or '—'}): ",
                 str(state.year_min_input or ""),
             )
             if result == BACK:
-                screen = 1
+                screen = 2
                 continue
             try:
                 state.year_min_input = int(result) if result.strip() else None
                 _validate_year(state.year_min_input, available_min, available_max, "el año mínimo")
-                screen = 3
+                screen = 4
             except ValueError as exc:
                 print(f"Valor no válido: {exc}")
-        elif screen == 3:
+        elif screen == 4:
             result = _simple_prompt(
                 f"Hasta el año (máx. {available_max or '—'}): ",
                 str(state.year_max_input or ""),
             )
             if result == BACK:
-                screen = 2
+                screen = 3
                 continue
             try:
                 state.year_max_input = int(result) if result.strip() else None
@@ -348,20 +361,20 @@ def run_interactive(
                     available_min,
                     available_max,
                 )
-                screen = 4
+                screen = 5
             except ValueError as exc:
                 print(f"Valor no válido: {exc}")
-        elif screen == 4:
+        elif screen == 5:
             result = _simple_prompt("¿Qué nombre le damos a la playlist? ", state.playlist_name)
             if result == BACK:
-                screen = 3
+                screen = 4
                 continue
             try:
                 requested = sanitize_playlist_name(result)
                 state.playlist_name = available_playlist_name(destination, requested)
                 if state.playlist_name != requested:
                     print(f"Ya existía; se usará: {state.playlist_name}")
-                screen = 5
+                screen = 6
             except ValueError as exc:
                 print(f"Nombre no válido: {exc}")
         else:
@@ -371,6 +384,14 @@ def run_interactive(
             print("\nResumen")
             print(f"Artistas incluidos: {', '.join(state.artists.included) or 'cualquiera'}")
             print(f"Artistas excluidos: {', '.join(state.artists.excluded) or 'ninguno'}")
+            print(
+                "Artistas de álbum incluidos: "
+                f"{', '.join(state.album_artists.included) or 'cualquiera'}"
+            )
+            print(
+                "Artistas de álbum excluidos: "
+                f"{', '.join(state.album_artists.excluded) or 'ninguno'}"
+            )
             print(f"Géneros incluidos: {', '.join(state.genres.included) or 'cualquiera'}")
             print(f"Géneros excluidos: {', '.join(state.genres.excluded) or 'ninguno'}")
             years_summary = (
@@ -391,7 +412,7 @@ def run_interactive(
                     .casefold()
                 )
                 if choice == "v" or choice == BACK:
-                    screen = 4
+                    screen = 5
                 elif choice == "c":
                     return None
                 continue
@@ -401,6 +422,6 @@ def run_interactive(
             if choice == "s":
                 return state.playlist_name, selected
             if choice == "v" or choice == BACK:
-                screen = 4
+                screen = 5
             elif choice == "c":
                 return None

@@ -86,6 +86,8 @@ python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
 python crear_playlist.py --size 8000 --seed 12345
+python crear_playlist.py --from-playlist "Favoritas.m3u8" --size 1000 --seed 12345
+python crear_playlist.py --from-playlist "Viaje.m3u" --exclude-playlist "Ya escuchadas.m3u"
 python crear_playlist.py --surprise --copy "/media/USB"
 python crear_playlist.py --profile "Jazz tranquilo"
 python crear_playlist.py --save-profile "Jazz tranquilo"
@@ -114,6 +116,11 @@ opcional con `chmod +x crear-playlist.sh`.
   `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
+- `--from-playlist RUTA`: limita las candidatas a la unión de una o varias playlists M3U/M3U8;
+  puede repetirse. A continuación se aplican las exclusiones y los filtros interactivos habituales.
+- `--exclude-playlist RUTA`: elimina candidatas citadas por una playlist M3U/M3U8; puede repetirse.
+  Se aceptan rutas absolutas o relativas al archivo de playlist y UTF-8 con o sin BOM. Las entradas
+  inexistentes, externas a la discoteca, no escaneadas o con URL se ignoran; `--verbose` las resume.
 - `--surprise` / `--no-surprise`: activa o desactiva explícitamente el modo sorpresa. La opción CLI
   prevalece sobre `surprise_mode` de `config.ini`.
 - `--config RUTA`: usa expresamente ese archivo INI.

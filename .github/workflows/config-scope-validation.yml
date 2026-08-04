@@ -1,0 +1,39 @@
+name: Config scope validation
+
+on:
+  push:
+    branches:
+      - agent/fix-config-scope
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m mypy playlist_builder
+      - name: Verify fixed behavior
+        shell: bash
+        run: |
+          ! python -m playlist_builder.cli --help | grep -F -- '--copy-structure'
+          python - <<'PY'
+          from pathlib import Path
+          from playlist_builder.config import AUDIO_EXTENSIONS, load_config
+
+          settings = load_config(Path('config.ini'))
+          assert settings.audio_extensions == AUDIO_EXTENSIONS
+          assert settings.profiles_file == Path('filter_profiles.json').resolve()
+          PY

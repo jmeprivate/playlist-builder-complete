@@ -11,6 +11,7 @@ from playlist_builder.ui import (
     SubstringCompleter,
     UIState,
     _normalize_choice,
+    _validate_year,
     available_playlist_name,
     format_preview,
     sanitize_playlist_name,
@@ -75,3 +76,12 @@ def test_album_artist_selection_has_independent_move_and_undo_state() -> None:
     assert state.album_artists.excluded == ["Various Artists"]
     state.album_artists.undo()
     assert state.album_artists.excluded == []
+
+
+def test_manual_years_still_validate_catalog_bounds() -> None:
+    with pytest.raises(ValueError, match="mínimo disponible"):
+        _validate_year(1990, 2000, 2020, "el año mínimo")
+    with pytest.raises(ValueError, match="máximo disponible"):
+        _validate_year(2021, 2000, 2020, "el año máximo")
+
+    _validate_year(1990, 2000, 2020, "el año mínimo", allow_unavailable=True)

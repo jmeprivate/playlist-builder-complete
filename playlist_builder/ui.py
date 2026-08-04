@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import random
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from html import escape as escape_html
@@ -25,6 +25,7 @@ from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
 from .filters import complete_year_range, filter_songs
 from .models import FilterSpec, Song
 from .normalization import deduplicate_display_values, normalize_for_search
+from .profiles import FilterProfile
 from .selector import SelectionResult, select_balanced_with_stats
 
 BACK = "__BACK__"
@@ -379,15 +380,17 @@ def _validate_year(
     available_min: int | None,
     available_max: int | None,
     label: str,
+    *,
+    allow_unavailable: bool = False,
 ) -> None:
     if year is None:
         return
     maximum_reasonable = datetime.now().year + MAX_REASONABLE_YEAR_OFFSET
     if not MIN_REASONABLE_YEAR <= year <= maximum_reasonable:
         raise ValueError(f"{label} debe estar entre {MIN_REASONABLE_YEAR} y {maximum_reasonable}")
-    if available_min is not None and year < available_min:
+    if not allow_unavailable and available_min is not None and year < available_min:
         raise ValueError(f"{label} es menor que el mínimo disponible ({available_min})")
-    if available_max is not None and year > available_max:
+    if not allow_unavailable and available_max is not None and year > available_max:
         raise ValueError(f"{label} es mayor que el máximo disponible ({available_max})")
 
 
@@ -401,6 +404,8 @@ def run_interactive(
     seed: int | None,
     surprise: bool = False,
     preview_entries: int = 5,
+    initial_profile: FilterProfile | None = None,
+    on_confirm: Callable[[FilterProfile], None] | None = None,
 ) -> tuple[str, list[Song]] | None:
     artists = sorted(
         deduplicate_display_values(value for song in songs for value in song.artist),
@@ -433,6 +438,58 @@ def run_interactive(
     )
 
     state = UIState()
+    if initial_profile is not None:
+        state.artists.included = list(initial_profile.included_artists)
+        state.artists.excluded = list(initial_profile.excluded_artists)
+        state.album_artists.included = list(initial_profile.included_album_artists)
+        state.album_artists.excluded = list(initial_profile.excluded_album_artists)
+        state.genres.included = list(initial_profile.included_genres)
+        state.genres.excluded = list(initial_profile.excluded_genres)
+        for filter_state in (state.artists, state.album_artists, state.genres):
+            filter_state.history = [("+", item) for item in filter_state.included] + [
+                ("-", item) for item in filter_state.excluded
+            ]
+        state.year_min_input = initial_profile.year_min
+        state.year_max_input = initial_profile.year_max
+        missing: list[str] = []
+        for label, filter_state, available in (
+            ("artista de pista", state.artists, artists),
+            ("artista de álbum", state.album_artists, album_artists),
+            ("género", state.genres, genres),
+        ):
+            known = {normalize_for_search(item) for item in available}
+            missing.extend(
+                f"{label}: {item}"
+                for item in filter_state.included + filter_state.excluded
+                if normalize_for_search(item) not in known
+            )
+        if missing:
+            notice = "El perfil conserva selecciones sin coincidencia actual: " + "; ".join(missing)
+            # select_values clears the terminal, so attach the warning to every
+            # relevant first screen instead of printing a message that vanishes.
+            state.artists.notice = notice
+            state.album_artists.notice = notice
+            state.genres.notice = notice
+        profile_has_no_year_match = (
+            not years
+            and (initial_profile.year_min is not None or initial_profile.year_max is not None)
+        ) or (
+            available_min is not None
+            and available_max is not None
+            and (
+                (initial_profile.year_min is not None and initial_profile.year_min > available_max)
+                or (
+                    initial_profile.year_max is not None
+                    and initial_profile.year_max < available_min
+                )
+            )
+        )
+        if profile_has_no_year_match:
+            year_notice = (
+                "El perfil conserva un intervalo de años sin coincidencia actual: "
+                f"{initial_profile.year_min or '…'}-{initial_profile.year_max or '…'}"
+            )
+            state.artists.notice = " ".join(filter(None, (state.artists.notice, year_notice)))
     session_rng = random.Random() if seed is None else random.Random(seed)
     candidates: list[Song] = []
     skipped_by_artist_quota = 0
@@ -461,7 +518,16 @@ def run_interactive(
                 continue
             try:
                 state.year_min_input = int(result) if result.strip() else None
-                _validate_year(state.year_min_input, available_min, available_max, "el año mínimo")
+                _validate_year(
+                    state.year_min_input,
+                    available_min,
+                    available_max,
+                    "el año mínimo",
+                    allow_unavailable=(
+                        initial_profile is not None
+                        and state.year_min_input == initial_profile.year_min
+                    ),
+                )
                 screen = 4
             except ValueError as exc:
                 print(f"Valor no válido: {exc}")
@@ -475,7 +541,16 @@ def run_interactive(
                 continue
             try:
                 state.year_max_input = int(result) if result.strip() else None
-                _validate_year(state.year_max_input, available_min, available_max, "el año máximo")
+                _validate_year(
+                    state.year_max_input,
+                    available_min,
+                    available_max,
+                    "el año máximo",
+                    allow_unavailable=(
+                        initial_profile is not None
+                        and state.year_max_input == initial_profile.year_max
+                    ),
+                )
                 state.year_min, state.year_max = complete_year_range(
                     state.year_min_input,
                     state.year_max_input,
@@ -604,6 +679,22 @@ def run_interactive(
                 _simple_prompt("[s] confirmar / [v] volver / [c] cancelar: ")
             )
             if choice == "s":
+                if on_confirm is not None:
+                    on_confirm(
+                        FilterProfile(
+                            included_artists=list(state.artists.included),
+                            excluded_artists=list(state.artists.excluded),
+                            included_album_artists=list(state.album_artists.included),
+                            excluded_album_artists=list(state.album_artists.excluded),
+                            included_genres=list(state.genres.included),
+                            excluded_genres=list(state.genres.excluded),
+                            year_min=state.year_min_input,
+                            year_max=state.year_max_input,
+                            max_album=max_per_album,
+                            max_artist=max_per_artist,
+                            size_mb=max_size_bytes / 1_000_000,
+                        )
+                    )
                 return state.playlist_name, state.selected
             if choice == "v" or choice == BACK:
                 screen = 6

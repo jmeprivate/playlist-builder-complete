@@ -5,6 +5,7 @@ import pytest
 
 from playlist_builder import ui
 from playlist_builder.models import Song
+from playlist_builder.profiles import FilterProfile
 from playlist_builder.selector import SelectionResult
 
 
@@ -97,3 +98,23 @@ def test_retry_reuses_candidates_and_limits(
     assert len(calls) == 2
     assert calls[0] == calls[1] == (songs, 321, 1, 3)
     assert result[1] == songs
+
+
+def test_loaded_profile_preserves_year_outside_current_catalog(
+    tmp_path: Path,
+    song_factory: Callable[..., Song],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    song = song_factory(year=2000)
+    _drive_prompts(monkeypatch, ["1990", "2000", "a", "Lista", "s"])
+
+    result = ui.run_interactive(
+        [song],
+        max_size_bytes=1_000,
+        max_per_album=1,
+        destination=tmp_path,
+        seed=3,
+        initial_profile=FilterProfile(year_min=1990, year_max=2000),
+    )
+
+    assert result == ("Lista.m3u", [song])

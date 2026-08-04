@@ -68,6 +68,7 @@ cuyos metadatos fallaron. Un cambio de tamaño/fecha o `--rescan` siempre fuerza
 ```ini
 [playlist_builder]
 music_root = /Users/usuario/Música/MiDiscoteca
+profiles_file = filter_profiles.json
 retry_error_after_days = 7
 default_max_artist = 0
 ```
@@ -86,6 +87,9 @@ python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
 python crear_playlist.py --size 8000 --seed 12345
 python crear_playlist.py --surprise --copy "/media/USB"
+python crear_playlist.py --profile "Jazz tranquilo"
+python crear_playlist.py --save-profile "Jazz tranquilo"
+python crear_playlist.py --list-profiles
 ```
 
 Después de instalar el proyecto en el entorno virtual, también puede usarse:
@@ -113,6 +117,10 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--surprise` / `--no-surprise`: activa o desactiva explícitamente el modo sorpresa. La opción CLI
   prevalece sobre `surprise_mode` de `config.ini`.
 - `--config RUTA`: usa expresamente ese archivo INI.
+- `--profile NOMBRE`: carga filtros y límites guardados antes de abrir la interfaz.
+- `--save-profile NOMBRE`: guarda los filtros después de confirmar el resumen. Antes de reemplazar
+  pregunta, salvo con `--force`; cancelar el flujo no escribe el perfil.
+- `--list-profiles`: muestra nombres y resúmenes sin escanear música ni abrir la interfaz.
 - `--rescan`: descarta la caché y relee todos los metadatos.
 - `--verbose`: informa sobre caché, lectura y operaciones. Puede revelar rutas y detalles; no se debe
   usar cuando se necesita una sorpresa estricta.
@@ -162,6 +170,30 @@ default_max_artist = 0
 En un checkout se usa el `config.ini` de la raíz del proyecto. Tras instalar, la plantilla incluida
 en el paquete se copia una sola vez a la ubicación de configuración del usuario de Windows, macOS o
 Linux. `--config RUTA` permite seleccionar otro archivo de forma explícita.
+
+## Perfiles de filtros
+
+`profiles_file` puede ser una ruta absoluta o relativa. Una ruta relativa se resuelve desde la
+carpeta del `config.ini`, nunca desde el directorio de trabajo; si se omite en un INI antiguo se usa
+`filter_profiles.json` junto al INI. El JSON UTF-8 está versionado y solo guarda selecciones
+legibles, años, tamaño y cuotas: no contiene rutas musicales ni estado transitorio de la UI. Se
+publica con un temporal y reemplazo atómico. Un JSON corrupto, una versión desconocida o un campo
+inválido produce un error claro sin modificarlo.
+
+La precedencia es **CLI explícita > perfil > INI** para tamaño y cuotas. Los filtros proceden del
+perfil y siguen siendo editables. La comparación normaliza mayúsculas, acentos, Unicode y espacios,
+pero se conserva la escritura elegida. Una selección que ya no existe se muestra y se avisa en vez
+de eliminarse.
+
+```bash
+# Crear tras seleccionar y confirmar en la UI:
+python crear_playlist.py --size 1500 --max-album 1 --save-profile "Viaje 2026"
+# Cargarlo; este tamaño explícito prevalece sobre el guardado:
+python crear_playlist.py --profile "Viaje 2026" --size 2000
+# Listar y reemplazar sin la pregunta adicional de reemplazo:
+python crear_playlist.py --list-profiles
+python crear_playlist.py --profile "Viaje 2026" --save-profile "Viaje 2026" --force
+```
 
 En modo sorpresa se omiten preview, composición y conteos de selección: se pide directamente el
 nombre y solo se presenta un resumen de filtros, límites, destino y el aviso de privacidad. No hay

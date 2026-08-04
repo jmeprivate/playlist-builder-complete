@@ -17,6 +17,7 @@ class Song:
     size_bytes: int
     title: str | None = None
     duration_seconds: float | None = None
+    album_artists: tuple[str, ...] = ()
 
     @property
     def artists(self) -> tuple[str, ...]:
@@ -27,6 +28,7 @@ class Song:
         return {
             "relative_path": self.relative_path.as_posix(),
             "artist": list(self.artist),
+            "album_artists": list(self.album_artists),
             "genres": list(self.genres),
             "year": self.year,
             "album": self.album,
@@ -43,6 +45,7 @@ class Song:
             path=root / relative_path,
             relative_path=relative_path,
             artist=tuple(str(value) for value in data.get("artist", [])),
+            album_artists=tuple(str(value) for value in data.get("album_artists", [])),
             genres=tuple(str(value) for value in data.get("genres", [])),
             year=int(data["year"]) if data.get("year") is not None else None,
             album=str(data["album"]),
@@ -62,6 +65,7 @@ class AuditIssue:
     relative_path: Path
     missing_tags: tuple[str, ...] = ()
     error: str | None = None
+    informational_tags: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -85,6 +89,8 @@ class AuditReport:
 class FilterSpec:
     included_artists: frozenset[str] = frozenset()
     excluded_artists: frozenset[str] = frozenset()
+    included_album_artists: frozenset[str] = frozenset()
+    excluded_album_artists: frozenset[str] = frozenset()
     included_genres: frozenset[str] = frozenset()
     excluded_genres: frozenset[str] = frozenset()
     year_min: int | None = None

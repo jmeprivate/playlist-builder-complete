@@ -97,7 +97,15 @@ def scan_library(
             if absent
         )
         if missing:
-            report.issues.append(AuditIssue(relative, missing_tags=missing))
+            report.issues.append(
+                AuditIssue(
+                    relative,
+                    missing_tags=missing,
+                    informational_tags=("AlbumArtist",) if not song.album_artists else (),
+                )
+            )
+        elif not song.album_artists:
+            report.issues.append(AuditIssue(relative, informational_tags=("AlbumArtist",)))
 
     write_cache(cache_path, new_cache)
     return songs, report

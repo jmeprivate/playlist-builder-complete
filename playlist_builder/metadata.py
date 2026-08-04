@@ -60,6 +60,7 @@ def read_song(path: Path, root: Path) -> Song:
         # Algunos WMA/ASF exponen Artist bajo Author. AlbumArtist no es un sustituto:
         # en recopilatorios suele ser "Various Artists" y alteraría los filtros.
         artists = _tag_values(tags, ("author",))
+    album_artists = _tag_values(tags, ("albumartist",))
     genres = _tag_values(tags, ("genre",), _GENRE_MULTI_VALUE_RE)
     years = _tag_values(tags, ("date", "year", "originaldate"))
     albums = _tag_values(tags, ("album",))
@@ -72,6 +73,7 @@ def read_song(path: Path, root: Path) -> Song:
         path=path,
         relative_path=relative,
         artist=tuple(artists),
+        album_artists=tuple(album_artists),
         genres=tuple(genres),
         year=parse_year(years),
         album=albums[0] if albums else path.parent.name,

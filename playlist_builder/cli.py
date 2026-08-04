@@ -100,13 +100,9 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         print("No se encontró ninguna canción legible en la colección.", file=sys.stderr)
         return 2
 
-    # Load the interactive modules after configuration so their compatibility
-    # defaults reflect the selected INI, even when no UI-specific parameters exist.
-    from . import filters, ui
-
-    ui.MIN_REASONABLE_YEAR = settings.min_reasonable_year
-    ui.MAX_REASONABLE_YEAR_OFFSET = settings.max_reasonable_year_offset
-    filters.complete_year_range.__defaults__ = (settings.default_year_margin,)
+    # Import after load_config(): ui.py and filters.py receive the selected
+    # compatibility defaults when they import values from config.py.
+    from . import ui
 
     result = ui.run_interactive(
         songs,

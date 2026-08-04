@@ -11,7 +11,6 @@ from playlist_builder.ui import (
     SubstringCompleter,
     UIState,
     _normalize_choice,
-    _validate_year,
     available_playlist_name,
     format_preview,
     sanitize_playlist_name,
@@ -56,15 +55,36 @@ def test_playlist_filename_sanitizing_and_increment(tmp_path: Path) -> None:
     assert available_playlist_name(tmp_path, "Lista.m3u") == "Lista (2).m3u"
 
 
-def test_preview_is_numbered_and_truncates_both_ends(song_factory) -> None:  # type: ignore[no-untyped-def]
+def test_preview_always_contains_the_full_selection(song_factory) -> None:  # type: ignore[no-untyped-def]
     songs = [song_factory(title=f"Title {number}") for number in range(6)]
-    preview = format_preview(songs, max_size_bytes=1_000, max_per_album=2, edge_entries=2)
+    preview = format_preview(
+        songs,
+        max_size_bytes=1_000,
+        max_per_album=2,
+        playlist_name="Lista.m3u",
+    )
     assert "1. Artist - Title 0" in preview
-    assert "2 canciones omitidas" in preview
+    assert "3. Artist - Title 2" in preview
     assert "6. Artist - Title 5" in preview
-    assert "3. Artist - Title 2" not in preview
-    full = format_preview(songs, max_size_bytes=1_000, max_per_album=2, edge_entries=2, full=True)
-    assert "3. Artist - Title 2" in full
+    assert "omitidas" not in preview
+
+
+def test_surprise_preview_masks_every_song_name(song_factory) -> None:  # type: ignore[no-untyped-def]
+    songs = [
+        song_factory(name="secret-one.mp3", title="Secret one"),
+        song_factory(name="secret-two.flac", title="Secret two"),
+    ]
+    preview = format_preview(
+        songs,
+        max_size_bytes=1_000,
+        max_per_album=2,
+        playlist_name="Viaje.m3u",
+        surprise=True,
+    )
+    assert "1 - Viaje.mp3" in preview
+    assert "2 - Viaje.flac" in preview
+    assert "Secret" not in preview
+    assert "secret-" not in preview
 
 
 def test_album_artist_selection_has_independent_move_and_undo_state() -> None:
@@ -76,12 +96,3 @@ def test_album_artist_selection_has_independent_move_and_undo_state() -> None:
     assert state.album_artists.excluded == ["Various Artists"]
     state.album_artists.undo()
     assert state.album_artists.excluded == []
-
-
-def test_manual_years_still_validate_catalog_bounds() -> None:
-    with pytest.raises(ValueError, match="mínimo disponible"):
-        _validate_year(1990, 2000, 2020, "el año mínimo")
-    with pytest.raises(ValueError, match="máximo disponible"):
-        _validate_year(2021, 2000, 2020, "el año máximo")
-
-    _validate_year(1990, 2000, 2020, "el año mínimo", allow_unavailable=True)

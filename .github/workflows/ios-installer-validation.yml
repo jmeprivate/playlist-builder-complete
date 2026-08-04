@@ -1,0 +1,105 @@
+name: iOS installer validation
+
+on:
+  push:
+    branches:
+      - agent/ios-installer
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  installer:
+    name: Installer on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Check POSIX shell syntax
+        run: sh -n install-ios.sh
+      - name: Install from the published wheel
+        env:
+          PLAYLIST_BUILDER_ALLOW_NON_IOS: "1"
+          PLAYLIST_BUILDER_HOME: ${{ runner.temp }}/ios-home
+          PLAYLIST_BUILDER_MUSIC_ROOT: ${{ runner.temp }}/music-one
+          PYTHON: python3
+        run: |
+          mkdir -p "$PLAYLIST_BUILDER_MUSIC_ROOT"
+          sh install-ios.sh
+      - name: Verify launchers and installed version
+        env:
+          PLAYLIST_BUILDER_HOME: ${{ runner.temp }}/ios-home
+        run: |
+          export PATH="$PLAYLIST_BUILDER_HOME/bin:$PATH"
+          crear-playlist --help >/dev/null
+          PYTHONPATH="$PLAYLIST_BUILDER_HOME/PlaylistBuilder/site-packages" python3 - <<'PY'
+          from importlib.metadata import version
+          assert version("playlist-builder-local") == "1.0.0"
+          PY
+      - name: Change music folder and preserve it on reinstall
+        env:
+          PLAYLIST_BUILDER_ALLOW_NON_IOS: "1"
+          PLAYLIST_BUILDER_HOME: ${{ runner.temp }}/ios-home
+          PYTHON: python3
+        run: |
+          export PATH="$PLAYLIST_BUILDER_HOME/bin:$PATH"
+          mkdir -p "${{ runner.temp }}/music-two"
+          configurar-playlist "${{ runner.temp }}/music-two"
+          sh install-ios.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import configparser
+          import os
+
+          config_path = Path(os.environ["PLAYLIST_BUILDER_HOME"]) / "PlaylistBuilder" / "config.ini"
+          parser = configparser.ConfigParser()
+          parser.read(config_path, encoding="utf-8")
+          expected = str(Path(os.environ["RUNNER_TEMP"]) / "music-two")
+          assert parser["playlist_builder"]["music_root"] == expected
+          PY
+
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install build
+      - run: python -m pytest -q
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m mypy playlist_builder
+      - run: python -m build
+
+  report:
+    if: always()
+    needs: [installer, quality]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report result on PR 17
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INSTALLER_RESULT: ${{ needs.installer.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "$INSTALLER_RESULT" = "success" ] && [ "$QUALITY_RESULT" = "success" ]; then
+            MESSAGE="iOS installer validation passed for \`$SHA\`: Python 3.12/3.13 installation, launchers, configuration persistence, 130 tests, Ruff, mypy and build are green. Workflow run: $RUN_ID."
+          else
+            MESSAGE="iOS installer validation failed for \`$SHA\` (installer=$INSTALLER_RESULT, quality=$QUALITY_RESULT). Workflow run: $RUN_ID."
+          fi
+          gh pr comment 17 --body "$MESSAGE"

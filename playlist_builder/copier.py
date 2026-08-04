@@ -125,8 +125,6 @@ def copy_and_write_playlist(
             _create_parent_directories(target.parent, destination, created_directories)
             os.replace(staged, target)
             created.append(target)
-        # Permite que futuros escaneos reconozcan una exportación situada dentro
-        # de MUSIC_ROOT, incluso cuando esa ejecución no vuelva a usar --copy.
         music_directory = destination / "Music"
         _create_parent_directories(music_directory, destination, created_directories)
         marker = music_directory / COPY_ROOT_MARKER
@@ -134,7 +132,13 @@ def copy_and_write_playlist(
             marker.write_text("Playlist Builder copy destination\n", encoding="utf-8")
             created_marker = marker
         playlist_path = destination / playlist_name
-        write_m3u_atomic(playlist_path, songs, mapping)
+        write_m3u_atomic(
+            playlist_path,
+            songs,
+            mapping,
+            surprise=surprise,
+            playlist_name=playlist_name,
+        )
         return CopyResult(playlist_path, mapping)
     except BaseException as exc:
         if created_marker is not None:

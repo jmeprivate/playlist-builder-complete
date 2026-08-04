@@ -20,10 +20,8 @@ def _write_config(path: Path, *, surprise: bool = False) -> Path:
         "cache_filename = .cache.json\n"
         "min_reasonable_year = 1000\n"
         "max_reasonable_year_offset = 1\n"
-        "audio_extensions = .mp3, .flac\n"
         f"surprise_mode = {'true' if surprise else 'false'}\n"
-        "preview_entries = 5\n"
-        "copy_structure = flat\n",
+        "preview_entries = 5\n",
         encoding="utf-8",
     )
     return path
@@ -40,6 +38,8 @@ def test_cli_accepts_decimal_size_and_rejects_invalid_values() -> None:
         build_parser().parse_args(["--max-album", "1.5"])
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--siz", "12"])
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--copy-structure", "tree"])
 
 
 @pytest.mark.parametrize("value", ["0", "", "sin límite", "sin limite"])
@@ -53,18 +53,6 @@ def test_surprise_flags_are_explicit_and_mutually_exclusive() -> None:
     assert build_parser().parse_args(["--no-surprise"]).surprise is False
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--surprise", "--no-surprise"])
-
-
-def test_copy_structure_cli_defaults_to_config_and_accepts_override(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path / "config.ini")
-    text = config_path.read_text(encoding="utf-8").replace(
-        "copy_structure = flat", "copy_structure = tree"
-    )
-    config_path.write_text(text, encoding="utf-8")
-    settings = load_config(config_path)
-
-    assert build_parser(settings).parse_args([]).copy_structure == "tree"
-    assert build_parser(settings).parse_args(["--copy-structure", "flat"]).copy_structure == "flat"
 
 
 def test_surprise_cli_value_precedes_config() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -40,7 +41,7 @@ def load_cache(path: Path, root: Path) -> dict[str, CacheEntry]:
             raise ValueError("estructura incompatible")
         digest = raw.get("digest")
         payload = {key: value for key, value in raw.items() if key != "digest"}
-        if not isinstance(digest, str) or not hashlib.compare_digest(
+        if not isinstance(digest, str) or not hmac.compare_digest(
             digest, _payload_digest(payload)
         ):
             raise ValueError("la caché fue modificada o está dañada")

@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
+from . import config as config_module
 from .audit import format_audit
-from .config import DEFAULT_MAX_ALBUM, DEFAULT_SIZE_MB, MUSIC_ROOT
+from .config import ConfigError, Settings, default_config_path, load_config
 from .copier import CopyTransactionError, copy_and_write_playlist
 from .m3u import write_m3u_atomic
 from .progress import ConsoleScanProgress
 from .scanner import scan_library
-from .ui import run_interactive
 
 
 def positive_decimal(value: str) -> float:
@@ -19,8 +20,8 @@ def positive_decimal(value: str) -> float:
         number = float(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("debe ser un número positivo") from exc
-    if number <= 0:
-        raise argparse.ArgumentTypeError("debe ser mayor que cero")
+    if not math.isfinite(number) or number <= 0:
+        raise argparse.ArgumentTypeError("debe ser un número finito mayor que cero")
     return number
 
 
@@ -34,25 +35,43 @@ def positive_integer(value: str) -> int:
     return number
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
+    size = settings.default_size_mb if settings else config_module.DEFAULT_SIZE_MB
+    max_album = settings.default_max_album if settings else config_module.DEFAULT_MAX_ALBUM
+    source = settings.source if settings else default_config_path()
     parser = argparse.ArgumentParser(
         description="Genera playlists M3U equilibradas desde una discoteca local."
     )
     parser.add_argument(
-        "--size", type=positive_decimal, default=DEFAULT_SIZE_MB, metavar="N",
-        help=f"tamaño máximo en MB decimales (por defecto: {DEFAULT_SIZE_MB:g})"
+        "--size",
+        type=positive_decimal,
+        default=size,
+        metavar="N",
+        help=f"tamaño máximo en MB decimales (configuración: {size:g})",
     )
     parser.add_argument(
-        "--max-album", type=positive_integer, default=DEFAULT_MAX_ALBUM, metavar="N",
-        help=f"máximo de canciones por álbum (por defecto: {DEFAULT_MAX_ALBUM})"
+        "--max-album",
+        type=positive_integer,
+        default=max_album,
+        metavar="N",
+        help=f"máximo de canciones por álbum (configuración: {max_album})",
     )
     parser.add_argument("--copy", type=Path, metavar="RUTA", help="copia la selección al destino")
     parser.add_argument("--audit", choices=("simple", "full"), help="muestra auditoría del catálogo")
-    parser.add_argument("--audit-only", action="store_true", help="audita y termina sin abrir la interfaz")
+    parser.add_argument(
+        "--audit-only", action="store_true", help="audita y termina sin abrir la interfaz"
+    )
     parser.add_argument("--seed", type=int, help="semilla para una selección reproducible")
     parser.add_argument("--rescan", action="store_true", help="ignora y reconstruye la caché")
     parser.add_argument("--verbose", action="store_true", help="muestra información detallada")
     parser.add_argument("--debug", action="store_true", help="activa logs de depuración y tracebacks")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=source,
+        metavar="RUTA",
+        help=f"archivo INI de configuración (por defecto: {source})",
+    )
     return parser
 
 
@@ -61,13 +80,17 @@ def _configure_logging(verbose: bool, debug: bool) -> None:
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
-def _run(args: argparse.Namespace) -> int:
-    root = MUSIC_ROOT.expanduser().resolve()
+def _run(args: argparse.Namespace, settings: Settings) -> int:
+    root = settings.music_root
     destination = args.copy.expanduser().resolve() if args.copy else root
     excluded = destination / "Music" if args.copy else None
     progress = None if args.audit_only else ConsoleScanProgress(sys.stderr)
     songs, report = scan_library(
-        root, rescan=args.rescan, excluded_root=excluded, progress=progress
+        root,
+        rescan=args.rescan,
+        excluded_root=excluded,
+        settings=settings,
+        progress=progress,
     )
     if args.audit or args.audit_only:
         print(format_audit(report, args.audit or "simple"))
@@ -76,7 +99,12 @@ def _run(args: argparse.Namespace) -> int:
     if not songs:
         print("No se encontró ninguna canción legible en la colección.", file=sys.stderr)
         return 2
-    result = run_interactive(
+
+    # Import after load_config(): ui.py and filters.py receive the selected
+    # compatibility defaults when they import values from config.py.
+    from . import ui
+
+    result = ui.run_interactive(
         songs,
         max_size_bytes=int(args.size * 1_000_000),
         max_per_album=args.max_album,
@@ -106,10 +134,29 @@ def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw_args = sys.argv[1:] if argv is None else argv
+
+    # Help must remain available even when the INI is missing or malformed.
+    if "-h" in raw_args or "--help" in raw_args:
+        build_parser().parse_args(raw_args)
+        return 0
+
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument("--config", type=Path)
+    bootstrap.add_argument("--debug", action="store_true")
+    preliminary, _ = bootstrap.parse_known_args(raw_args)
+    try:
+        settings = load_config(preliminary.config)
+    except ConfigError as exc:
+        if preliminary.debug:
+            raise
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    args = build_parser(settings).parse_args(raw_args)
     _configure_logging(args.verbose, args.debug)
     try:
-        return _run(args)
+        return _run(args, settings)
     except KeyboardInterrupt:
         print("\nCancelado por el usuario; no se han publicado archivos temporales.", file=sys.stderr)
         return 130

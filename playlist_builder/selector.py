@@ -8,13 +8,16 @@ from .models import Song
 
 
 def select_balanced(
-    candidates: list[Song], max_size_bytes: int, max_per_album: int, seed: int | None = None
+    candidates: list[Song],
+    max_size_bytes: int,
+    max_per_album: int,
+    seed: int | random.Random | None = None,
 ) -> list[Song]:
     if max_size_bytes <= 0:
         raise ValueError("max_size_bytes debe ser positivo")
     if max_per_album <= 0:
         raise ValueError("max_per_album debe ser positivo")
-    randomizer = random.Random(seed)
+    randomizer = seed if isinstance(seed, random.Random) else random.Random(seed)
     grouped: dict[Path, list[Song]] = defaultdict(list)
     for song in sorted(
         candidates,

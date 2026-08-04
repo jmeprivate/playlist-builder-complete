@@ -6,6 +6,7 @@ from playlist_builder.ui import (
     SelectionState,
     UIState,
     available_playlist_name,
+    format_preview,
     sanitize_playlist_name,
 )
 
@@ -29,6 +30,17 @@ def test_playlist_filename_sanitizing_and_increment(tmp_path: Path) -> None:
         sanitize_playlist_name("..", platform="posix")
     (tmp_path / "Lista.m3u").write_text("existing", encoding="utf-8")
     assert available_playlist_name(tmp_path, "Lista.m3u") == "Lista (2).m3u"
+
+
+def test_preview_is_numbered_and_truncates_both_ends(song_factory) -> None:  # type: ignore[no-untyped-def]
+    songs = [song_factory(title=f"Title {number}") for number in range(6)]
+    preview = format_preview(songs, max_size_bytes=1_000, max_per_album=2, edge_entries=2)
+    assert "1. Artist - Title 0" in preview
+    assert "2 canciones omitidas" in preview
+    assert "6. Artist - Title 5" in preview
+    assert "3. Artist - Title 2" not in preview
+    full = format_preview(songs, max_size_bytes=1_000, max_per_album=2, edge_entries=2, full=True)
+    assert "3. Artist - Title 2" in full
 
 
 def test_album_artist_selection_has_independent_move_and_undo_state() -> None:

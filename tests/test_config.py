@@ -18,6 +18,9 @@ def write_config(path: Path, **changes: str) -> Path:
         "min_reasonable_year": "1000",
         "max_reasonable_year_offset": "1",
         "audio_extensions": ".mp3, .FLAC, .ape",
+        "surprise_mode": "false",
+        "preview_entries": "5",
+        "copy_structure": "flat",
     } | changes
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -32,6 +35,9 @@ def test_load_valid_config_normalizes_values(tmp_path: Path) -> None:
     assert settings.music_root == (tmp_path / "music").resolve()
     assert settings.audio_extensions == frozenset({".mp3", ".flac", ".ape"})
     assert settings.default_size_mb == 8000
+    assert settings.surprise_mode is False
+    assert settings.preview_entries == 5
+    assert settings.copy_structure == "flat"
 
 
 def test_cli_values_override_ini(tmp_path: Path) -> None:
@@ -71,6 +77,9 @@ def test_installed_default_is_copied_to_user_config(
         ({"cache_filename": "folder\\cache.json"}, "cache_filename"),
         ({"audio_extensions": "mp3"}, "audio_extensions"),
         ({"audio_extensions": ".mp3, .MP3"}, "audio_extensions"),
+        ({"surprise_mode": "perhaps"}, "surprise_mode"),
+        ({"preview_entries": "0"}, "preview_entries"),
+        ({"copy_structure": "sideways"}, "copy_structure"),
     ],
 )
 def test_invalid_values_identify_file_section_and_key(

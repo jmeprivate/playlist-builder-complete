@@ -80,6 +80,7 @@ python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
 python crear_playlist.py --size 8000 --seed 12345
+python crear_playlist.py --surprise --copy "/media/USB"
 ```
 
 Después de instalar el proyecto en el entorno virtual, también puede usarse:
@@ -96,12 +97,18 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--size N`: máximo en MB decimales (`1 MB = 1_000_000 bytes`); acepta decimales y vale 8000 por
   defecto. El resultado nunca supera el límite.
 - `--max-album N`: máximo de canciones por carpeta de álbum; vale 2 por defecto.
-- `--copy RUTA`: copia las canciones a `RUTA/Music/<ruta original>` y crea allí el M3U.
+- `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
+  planos `índice - título (artista).ext`; `copy_structure = tree` conserva el árbol original.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
+  `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
+- `--surprise` / `--no-surprise`: activa o desactiva explícitamente el modo sorpresa. La opción CLI
+  prevalece sobre `surprise_mode` de `config.ini`.
+- `--config RUTA`: usa expresamente ese archivo INI.
 - `--rescan`: descarta la caché y relee todos los metadatos.
-- `--verbose`: informa sobre caché, lectura y operaciones.
+- `--verbose`: informa sobre caché, lectura y operaciones. Puede revelar rutas y detalles; no se debe
+  usar cuando se necesita una sorpresa estricta.
 - `--debug`: añade detalles de depuración y deja visibles los tracebacks inesperados.
 
 ## Interfaz
@@ -128,9 +135,31 @@ un filtro temporal.
 Los años son opcionales e inclusivos. Si se rellena solo un extremo, el otro se calcula con
 `DEFAULT_YEAR_MARGIN` y se limita al rango disponible.
 
-Si el nombre del M3U ya existe, la aplicación propone automáticamente `Nombre (2).m3u`, sin
-sobrescribirlo. Antes de escribir muestra filtros, candidatas, tamaños y selección prevista, y deja
-confirmar, volver o cancelar.
+Después de fijar los filtros, la aplicación calcula una única selección y muestra su preview antes de
+pedir el nombre. La preview abreviada enseña las primeras y últimas cinco entradas (configurables), y
+ofrece `[a]ceptar`, `[r]ehacer`, `[v]er completa` y `[c]ancelar`. Rehacer conserva filtros y límites.
+Con `--seed`, la selección es reproducible y la interfaz no finge que puede rehacerla al azar: ofrece
+volver a filtros o cancelar. La selección aceptada es exactamente la confirmada y escrita.
+
+Las preferencias de preview y copia viven en el mismo `config.ini` que el resto de la configuración:
+
+```ini
+[playlist_builder]
+surprise_mode = false
+preview_entries = 5
+copy_structure = flat
+```
+
+En un checkout se usa el `config.ini` de la raíz del proyecto. Tras instalar, la plantilla incluida
+en el paquete se copia una sola vez a la ubicación de configuración del usuario de Windows, macOS o
+Linux. `--config RUTA` permite seleccionar otro archivo de forma explícita.
+
+En modo sorpresa se omiten preview, composición y conteos de selección: se pide directamente el
+nombre y solo se presenta un resumen de filtros, límites, destino y el aviso de privacidad. No hay
+acción de rehacer. Con `--copy`, incluso si `copy_structure = tree`, la protección tiene prioridad y
+se usan rutas planas `Music/1 - Nombre playlist.ext`, conservando Unicode, espacios y la extensión.
+Las colisiones reciben el sufijo incremental habitual. El M3U mantiene `#EXTINF` por compatibilidad:
+**abrir el archivo M3U sí revela títulos y artistas**.
 
 ## Selección equilibrada
 

@@ -37,6 +37,9 @@ class Settings:
     min_reasonable_year: int
     max_reasonable_year_offset: int
     audio_extensions: frozenset[str]
+    surprise_mode: bool
+    preview_entries: int
+    copy_structure: str
     source: Path
 
 
@@ -132,6 +135,9 @@ def load_config(path: Path | str | None = None) -> Settings:
         "min_reasonable_year",
         "max_reasonable_year_offset",
         "audio_extensions",
+        "surprise_mode",
+        "preview_entries",
+        "copy_structure",
     }
     missing = expected - set(section)
     if missing:
@@ -198,6 +204,16 @@ def load_config(path: Path | str | None = None) -> Settings:
     if len(set(raw_extensions)) != len(raw_extensions):
         raise _problem(source, "audio_extensions", "contiene extensiones duplicadas")
 
+    try:
+        surprise_mode = section.getboolean("surprise_mode")
+    except ValueError as exc:
+        raise _problem(source, "surprise_mode", "debe ser true o false") from exc
+    if surprise_mode is None:
+        raise _problem(source, "surprise_mode", "falta la clave obligatoria")
+    copy_structure = section["copy_structure"].strip().casefold()
+    if copy_structure not in {"flat", "tree"}:
+        raise _problem(source, "copy_structure", "debe ser 'flat' o 'tree'")
+
     settings = Settings(
         music_root=root.resolve(),
         default_year_margin=positive_int("default_year_margin"),
@@ -207,6 +223,9 @@ def load_config(path: Path | str | None = None) -> Settings:
         min_reasonable_year=minimum,
         max_reasonable_year_offset=offset,
         audio_extensions=frozenset(raw_extensions),
+        surprise_mode=surprise_mode,
+        preview_entries=positive_int("preview_entries"),
+        copy_structure=copy_structure,
         source=source,
     )
     _publish_compatibility_defaults(settings)

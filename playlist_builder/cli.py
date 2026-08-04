@@ -57,14 +57,26 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
         help=f"máximo de canciones por álbum (configuración: {max_album})",
     )
     parser.add_argument("--copy", type=Path, metavar="RUTA", help="copia la selección al destino")
-    parser.add_argument("--audit", choices=("simple", "full"), help="muestra auditoría del catálogo")
+    parser.add_argument(
+        "--audit", choices=("simple", "full"), help="muestra auditoría del catálogo"
+    )
     parser.add_argument(
         "--audit-only", action="store_true", help="audita y termina sin abrir la interfaz"
     )
     parser.add_argument("--seed", type=int, help="semilla para una selección reproducible")
+    surprise = parser.add_mutually_exclusive_group()
+    surprise.add_argument(
+        "--surprise", dest="surprise", action="store_true", help="oculta la selección"
+    )
+    surprise.add_argument(
+        "--no-surprise", dest="surprise", action="store_false", help="muestra la preview"
+    )
+    parser.set_defaults(surprise=None)
     parser.add_argument("--rescan", action="store_true", help="ignora y reconstruye la caché")
     parser.add_argument("--verbose", action="store_true", help="muestra información detallada")
-    parser.add_argument("--debug", action="store_true", help="activa logs de depuración y tracebacks")
+    parser.add_argument(
+        "--debug", action="store_true", help="activa logs de depuración y tracebacks"
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -80,7 +92,17 @@ def _configure_logging(verbose: bool, debug: bool) -> None:
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
+def resolve_surprise(cli_value: bool | None, configured_value: bool) -> bool:
+    return configured_value if cli_value is None else cli_value
+
+
 def _run(args: argparse.Namespace, settings: Settings) -> int:
+    surprise = resolve_surprise(args.surprise, settings.surprise_mode)
+    if surprise and args.audit == "full":
+        raise ValueError(
+            "--audit full revela rutas y no es compatible con modo sorpresa; "
+            "use --audit simple o --no-surprise"
+        )
     root = settings.music_root
     destination = args.copy.expanduser().resolve() if args.copy else root
     excluded = destination / "Music" if args.copy else None
@@ -110,6 +132,8 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         max_per_album=args.max_album,
         destination=destination,
         seed=args.seed,
+        surprise=surprise,
+        preview_entries=settings.preview_entries,
     )
     if result is None:
         print("Operación cancelada; no se creó ningún archivo.")
@@ -119,10 +143,17 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
     if missing:
         rendered = "\n".join(f"- {path}" for path in missing)
         raise FileNotFoundError(
-            "Algunas canciones fueron eliminadas después del escaneo; vuelva a ejecutar:\n" + rendered
+            "Algunas canciones fueron eliminadas después del escaneo; vuelva a ejecutar:\n"
+            + rendered
         )
     if args.copy:
-        final_path = copy_and_write_playlist(destination, playlist_name, selected).playlist_path
+        final_path = copy_and_write_playlist(
+            destination,
+            playlist_name,
+            selected,
+            surprise=surprise,
+            copy_structure=settings.copy_structure,
+        ).playlist_path
     else:
         final_path = root / playlist_name
         write_m3u_atomic(final_path, selected)
@@ -158,7 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run(args, settings)
     except KeyboardInterrupt:
-        print("\nCancelado por el usuario; no se han publicado archivos temporales.", file=sys.stderr)
+        print(
+            "\nCancelado por el usuario; no se han publicado archivos temporales.", file=sys.stderr
+        )
         return 130
     except EOFError:
         print("\nLa entrada del terminal se cerró; operación cancelada.", file=sys.stderr)

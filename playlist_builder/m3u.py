@@ -144,19 +144,15 @@ def render_m3u(
     for index, song in enumerate(songs, 1):
         duration = int(song.duration_seconds) if song.duration_seconds is not None else -1
         target = overrides.get(song.path, song.path)
-        try:
-            entry = os.path.relpath(target, playlist_directory)
-        except ValueError:
-            entry = str(target)
-        portable_entry = Path(entry).as_posix()
-        if "\n" in portable_entry or "\r" in portable_entry:
+        entry = target.expanduser().resolve(strict=False).as_posix()
+        if "\n" in entry or "\r" in entry:
             raise ValueError(f"La ruta no se puede representar de forma segura en M3U: {target}")
         title = (
             surprise_display_name(index, playlist_name, song)
             if surprise and playlist_name is not None
             else _display_title(song)
         )
-        lines.extend((f"#EXTINF:{duration},{title}", portable_entry))
+        lines.extend((f"#EXTINF:{duration},{title}", entry))
     return "\n".join(lines) + "\n"
 
 

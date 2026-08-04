@@ -3,7 +3,6 @@ from __future__ import annotations
 import configparser
 import math
 import os
-import re
 import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -14,7 +13,6 @@ from .normalization import normalize_for_search
 
 SECTION = "playlist_builder"
 GENRE_ALIASES_SECTION = "genre_aliases"
-_EXTENSION = re.compile(r"\.[a-z0-9]+\Z")
 
 # Compatibility defaults for modules imported before a configuration is loaded.
 MUSIC_ROOT = Path(r"/ruta/a/MiDiscoteca")
@@ -88,7 +86,6 @@ class Settings:
     audio_extensions: frozenset[str]
     surprise_mode: bool
     preview_entries: int
-    copy_structure: str
     profiles_file: Path
     genre_aliases: GenreAliases
     source: Path
@@ -267,14 +264,11 @@ def load_config(path: Path | str | None = None) -> Settings:
         "cache_filename",
         "min_reasonable_year",
         "max_reasonable_year_offset",
-        "audio_extensions",
         "surprise_mode",
         "preview_entries",
-        "copy_structure",
-        "profiles_file",
     }
     # Optional additions retain compatibility with existing user INIs.
-    missing = expected - {"profiles_file", "deduplicate"} - set(section)
+    missing = expected - {"deduplicate"} - set(section)
     if missing:
         key = sorted(missing)[0]
         raise _problem(source, key, "falta la clave obligatoria")
@@ -348,28 +342,8 @@ def load_config(path: Path | str | None = None) -> Settings:
     if not 0 <= offset <= 100:
         raise _problem(source, "max_reasonable_year_offset", "debe estar entre 0 y 100")
 
-    raw_extensions = [item.strip().casefold() for item in section["audio_extensions"].split(",")]
-    if not raw_extensions or any(not item for item in raw_extensions):
-        raise _problem(source, "audio_extensions", "use extensiones separadas por comas")
-    invalid = next((item for item in raw_extensions if not _EXTENSION.fullmatch(item)), None)
-    if invalid is not None:
-        raise _problem(source, "audio_extensions", f"extensión no válida: {invalid!r}")
-    if len(set(raw_extensions)) != len(raw_extensions):
-        raise _problem(source, "audio_extensions", "contiene extensiones duplicadas")
-
     surprise_mode = _parse_boolean(source, section, "surprise_mode")
     deduplicate = _parse_boolean(source, section, "deduplicate", DEFAULT_DEDUPLICATE)
-
-    copy_structure = section["copy_structure"].strip().casefold()
-    if copy_structure not in {"flat", "tree"}:
-        raise _problem(source, "copy_structure", "debe ser 'flat' o 'tree'")
-
-    raw_profiles = section.get("profiles_file", PROFILES_FILENAME).strip()
-    if not raw_profiles:
-        raise _problem(source, "profiles_file", "la ruta no puede estar vacía")
-    profiles_file = Path(raw_profiles).expanduser()
-    if not profiles_file.is_absolute():
-        profiles_file = source.parent / profiles_file
 
     settings = Settings(
         music_root=root.resolve(),
@@ -382,11 +356,10 @@ def load_config(path: Path | str | None = None) -> Settings:
         cache_filename=cache,
         min_reasonable_year=minimum,
         max_reasonable_year_offset=offset,
-        audio_extensions=frozenset(raw_extensions),
+        audio_extensions=AUDIO_EXTENSIONS,
         surprise_mode=surprise_mode,
         preview_entries=positive_int("preview_entries"),
-        copy_structure=copy_structure,
-        profiles_file=profiles_file.resolve(),
+        profiles_file=(source.parent / PROFILES_FILENAME).resolve(),
         genre_aliases=GenreAliases(canonical_displays, alias_to_canonical),
         source=source,
     )

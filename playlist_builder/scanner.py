@@ -15,7 +15,7 @@ from .cache import (
     utc_now,
     write_catalog_cache,
 )
-from .config import Settings, load_config
+from .config import COPY_ROOT_MARKER, Settings, load_config
 from .metadata import read_song
 from .models import AuditIssue, AuditReport, Song
 from .progress import ProgressCallback, ScanProgress
@@ -84,6 +84,14 @@ def _discover_audio_files(
                     AuditIssue(relative, error=f"{type(exc).__name__}: {exc}", is_directory=True)
                 )
                 LOGGER.warning("No se pudo resolver %s: %s", child, exc)
+                continue
+            if (child / COPY_ROOT_MARKER).is_file():
+                LOGGER.info(
+                    "Se omite %s: contiene el marcador %s de una exportación previa; "
+                    "elimine ese archivo para volver a escanearla",
+                    child,
+                    COPY_ROOT_MARKER,
+                )
                 continue
             if _is_inside(resolved, excluded) or _is_stale_copy_stage(relative):
                 continue

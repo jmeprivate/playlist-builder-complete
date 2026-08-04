@@ -107,6 +107,45 @@ def test_normal_flat_copy_keeps_historical_name(
     assert result.copied_paths[song.path].name == "1 - Jóga (Björk).mp3"
 
 
+def test_flat_names_follow_final_order_and_metadata_fallbacks(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
+    first = song_factory(name="disk-name.FLAC", artist=(), title=None)
+    second = song_factory(name="02.mp3", artist=("Sigur Rós",), title="Svefn-g-englar")
+
+    result = copy_and_write_playlist(tmp_path / "out", "Lista.m3u", [second, first])
+
+    assert result.copied_paths[second.path].name == "1 - Svefn-g-englar (Sigur Rós).mp3"
+    assert result.copied_paths[first.path].name == ("2 - disk-name (Artista desconocido).FLAC")
+    entries = [
+        line
+        for line in result.playlist_path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+    assert entries == [
+        "Music/1 - Svefn-g-englar (Sigur Rós).mp3",
+        "Music/2 - disk-name (Artista desconocido).FLAC",
+    ]
+
+
+def test_flat_copy_reuses_identical_content_and_suffixes_different_content(
+    tmp_path: Path, song_factory: Callable[..., Song]
+) -> None:
+    song = song_factory(artist=("Ana",), title="Tema")
+    destination = tmp_path / "out"
+    expected = destination / "Music" / "1 - Tema (Ana).mp3"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(song.path.read_bytes())
+
+    reused = copy_and_write_playlist(destination, "Una.m3u", [song])
+    assert reused.copied_paths[song.path] == expected
+
+    expected.write_bytes(b"contenido ajeno")
+    collided = copy_and_write_playlist(destination, "Dos.m3u", [song])
+    assert collided.copied_paths[song.path].name == "1 - Tema (Ana) (2).mp3"
+    assert expected.read_bytes() == b"contenido ajeno"
+
+
 def test_surprise_publication_failure_does_not_leak_song_path(
     tmp_path: Path,
     song_factory: Callable[..., Song],

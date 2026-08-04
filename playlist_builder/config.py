@@ -27,6 +27,10 @@ DEFAULT_MAX_ARTIST = 0
 CACHE_FILENAME = ".playlist_catalog.json"
 CONFIG_FILENAME = "config.ini"
 PROFILES_FILENAME = "filter_profiles.json"
+# Marca persistente escrita en el Music/ de una exportación para que escaneos
+# posteriores la excluyan sin depender de --copy.  Debe ser idéntica en el
+# lado que la escribe (copier) y el que la lee (scanner).
+COPY_ROOT_MARKER = ".playlist-builder-copy-root"
 MIN_REASONABLE_YEAR = 1000
 MAX_REASONABLE_YEAR_OFFSET = 1
 AUDIO_EXTENSIONS = frozenset({".mp3", ".flac", ".m4a", ".mp4", ".ogg", ".opus", ".ape"})

@@ -407,7 +407,10 @@ def run_interactive(
         f"- {len(songs)} canciones\n- años disponibles: {year_text}\n"
     )
     if surprise:
-        print("Modo sorpresa activo: los nombres se mostrarán enmascarados hasta la reproducción.\n")
+        print(
+            "Modo sorpresa activo: los nombres se mostrarán enmascarados "
+            "hasta la reproducción.\n"
+        )
     print(
         "Usa + para incluir, - para excluir, Tab para coincidencias, "
         "Enter para aceptar y Esc para volver.\n"
@@ -483,8 +486,9 @@ def run_interactive(
             result = select_values("Géneros", genres, state.genres)
             screen = 1 if result == BACK else 3
         elif screen == 3:
+            available_text = str(available_min) if available_min is not None else "—"
             result = _simple_prompt(
-                f"Desde el año (disponible desde {available_min if available_min is not None else '—'}): ",
+                f"Desde el año (disponible desde {available_text}): ",
                 str(state.year_min_input) if state.year_min_input is not None else "",
             )
             if result == BACK:
@@ -496,8 +500,9 @@ def run_interactive(
             except ValueError:
                 print("Valor no válido: el año debe ser un número entero")
         elif screen == 4:
+            available_text = str(available_max) if available_max is not None else "—"
             result = _simple_prompt(
-                f"Hasta el año (disponible hasta {available_max if available_max is not None else '—'}): ",
+                f"Hasta el año (disponible hasta {available_text}): ",
                 str(state.year_max_input) if state.year_max_input is not None else "",
             )
             if result == BACK:

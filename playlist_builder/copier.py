@@ -90,8 +90,11 @@ def copy_and_write_playlist(
             try:
                 shutil.copy2(song.path, staged)
             except OSError as exc:
-                detail = "una canción seleccionada" if surprise else str(song.path)
-                raise CopyTransactionError(f"Falló la copia de {detail}: {exc}") from exc
+                if surprise:
+                    raise CopyTransactionError(
+                        "Falló la copia de una canción seleccionada; no se publicó el M3U"
+                    ) from exc
+                raise CopyTransactionError(f"Falló la copia de {song.path}: {exc}") from exc
             staged_items.append((staged, final_target, False))
         for staged, target, reuse in staged_items:
             if reuse:
@@ -102,9 +105,13 @@ def copy_and_write_playlist(
         playlist_path = destination / playlist_name
         write_m3u_atomic(playlist_path, songs, mapping)
         return CopyResult(playlist_path, mapping)
-    except (OSError, CopyTransactionError):
+    except (OSError, CopyTransactionError) as exc:
         for path in reversed(created):
             path.unlink(missing_ok=True)
+        if surprise and not isinstance(exc, CopyTransactionError):
+            raise CopyTransactionError(
+                "Falló la publicación de la copia en modo sorpresa; no se publicó el M3U"
+            ) from exc
         raise
     finally:
         shutil.rmtree(stage, ignore_errors=True)

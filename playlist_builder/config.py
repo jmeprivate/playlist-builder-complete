@@ -36,8 +36,17 @@ class UserConfig:
     copy_structure: str = "flat"
 
 
-def load_user_config(path: Path = Path("config.ini")) -> UserConfig:
+def default_config_path() -> Path:
+    """Prefer an explicit working-directory config, then the launcher-adjacent example."""
+    local = Path("config.ini")
+    if local.is_file():
+        return local
+    return Path(__file__).resolve().parent.parent / "config.ini"
+
+
+def load_user_config(path: Path | None = None) -> UserConfig:
     """Load optional UI preferences, failing clearly on invalid values."""
+    path = path or default_config_path()
     parser = ConfigParser()
     if not path.is_file():
         return UserConfig()

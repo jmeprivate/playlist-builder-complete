@@ -91,9 +91,18 @@ def _configure_logging(verbose: bool, debug: bool) -> None:
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
+def resolve_surprise(cli_value: bool | None, configured_value: bool) -> bool:
+    return configured_value if cli_value is None else cli_value
+
+
 def _run(args: argparse.Namespace) -> int:
     config = load_user_config()
-    surprise = config.surprise_mode if args.surprise is None else args.surprise
+    surprise = resolve_surprise(args.surprise, config.surprise_mode)
+    if surprise and args.audit == "full":
+        raise ValueError(
+            "--audit full revela rutas y no es compatible con modo sorpresa; "
+            "use --audit simple o --no-surprise"
+        )
     root = MUSIC_ROOT.expanduser().resolve()
     destination = args.copy.expanduser().resolve() if args.copy else root
     excluded = destination / "Music" if args.copy else None

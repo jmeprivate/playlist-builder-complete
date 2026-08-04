@@ -72,3 +72,23 @@ def test_normal_flat_copy_keeps_historical_name(
     song = song_factory(name="original.mp3", artist=("Björk",), title="Jóga")
     result = copy_and_write_playlist(tmp_path / "out", "Lista.m3u", [song])
     assert result.copied_paths[song.path].name == "1 - Jóga (Björk).mp3"
+
+
+def test_surprise_publication_failure_does_not_leak_song_path(
+    tmp_path: Path,
+    song_factory: Callable[..., Song],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    song = song_factory(name="secret-title.mp3")
+    real_replace = copier.os.replace
+
+    def fail_publishing(source: Path, target: Path) -> None:
+        if target.suffix == ".mp3":
+            raise OSError(f"cannot publish {target}")
+        real_replace(source, target)
+
+    monkeypatch.setattr(copier.os, "replace", fail_publishing)
+    with pytest.raises(CopyTransactionError) as error:
+        copy_and_write_playlist(tmp_path / "out", "Sorpresa.m3u", [song], surprise=True)
+    assert "secret-title" not in str(error.value)
+    assert not (tmp_path / "out" / "Sorpresa.m3u").exists()

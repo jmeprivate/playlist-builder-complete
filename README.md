@@ -97,6 +97,7 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
   planos `índice - título (artista).ext`; `copy_structure = tree` conserva el árbol original.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
+  `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
 - `--surprise` / `--no-surprise`: activa o desactiva explícitamente el modo sorpresa. La opción CLI
@@ -143,6 +144,10 @@ surprise_mode = false
 preview_entries = 5
 copy_structure = flat
 ```
+
+Se busca primero `config.ini` en el directorio de trabajo y, al usar los launchers incluidos, se usa
+como respaldo el archivo situado junto al proyecto. Así una configuración local explícita puede
+prevalecer sin depender del directorio desde el que se invocó el script.
 
 En modo sorpresa se omiten preview, composición y conteos de selección: se pide directamente el
 nombre y solo se presenta un resumen de filtros, límites, destino y el aviso de privacidad. No hay

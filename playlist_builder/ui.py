@@ -21,7 +21,12 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.shortcuts import clear, confirm, print_formatted_text
 
-from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
+from .config import (
+    EMPTY_GENRE_ALIASES,
+    MAX_REASONABLE_YEAR_OFFSET,
+    MIN_REASONABLE_YEAR,
+    GenreAliases,
+)
 from .filters import complete_year_range, filter_songs
 from .models import FilterSpec, Song
 from .normalization import deduplicate_display_values, normalize_for_search
@@ -406,6 +411,7 @@ def run_interactive(
     preview_entries: int = 5,
     initial_profile: FilterProfile | None = None,
     on_confirm: Callable[[FilterProfile], None] | None = None,
+    genre_aliases: GenreAliases = EMPTY_GENRE_ALIASES,
 ) -> tuple[str, list[Song]] | None:
     artists = sorted(
         deduplicate_display_values(value for song in songs for value in song.artist),
@@ -416,7 +422,7 @@ def run_interactive(
         key=normalize_for_search,
     )
     genres = sorted(
-        deduplicate_display_values(value for song in songs for value in song.genres),
+        genre_aliases.display_options(value for song in songs for value in song.genres),
         key=normalize_for_search,
     )
     years = [song.year for song in songs if song.year is not None]
@@ -452,16 +458,16 @@ def run_interactive(
         state.year_min_input = initial_profile.year_min
         state.year_max_input = initial_profile.year_max
         missing: list[str] = []
-        for label, filter_state, available in (
-            ("artista de pista", state.artists, artists),
-            ("artista de álbum", state.album_artists, album_artists),
-            ("género", state.genres, genres),
+        for label, filter_state, available, resolve in (
+            ("artista de pista", state.artists, artists, normalize_for_search),
+            ("artista de álbum", state.album_artists, album_artists, normalize_for_search),
+            ("género", state.genres, genres, genre_aliases.resolve),
         ):
-            known = {normalize_for_search(item) for item in available}
+            known = {resolve(item) for item in available}
             missing.extend(
                 f"{label}: {item}"
                 for item in filter_state.included + filter_state.excluded
-                if normalize_for_search(item) not in known
+                if resolve(item) not in known
             )
         if missing:
             notice = "El perfil conserva selecciones sin coincidencia actual: " + "; ".join(missing)
@@ -564,7 +570,7 @@ def run_interactive(
                 print(f"Valor no válido: {exc}")
         elif screen == 5:
             spec = _to_filter_spec(state)
-            candidates = filter_songs(songs, spec)
+            candidates = filter_songs(songs, spec, genre_aliases)
             if not state.selected:
                 selection = select_balanced_with_stats(
                     candidates,

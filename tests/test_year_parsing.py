@@ -6,27 +6,27 @@ from playlist_builder.metadata import parse_year
 
 @pytest.mark.parametrize("raw", ["1986", "1986-04-01", "published 1986/04/01", ["1986"]])
 def test_parse_year_formats(raw: object) -> None:
-    assert parse_year(raw, current_year=2026) == 1986
+    assert parse_year(raw) == 1986
 
 
-def test_parse_year_rejects_unreasonable_values() -> None:
-    assert parse_year("0999", current_year=2026) is None
-    assert parse_year("2099", current_year=2026) is None
+def test_parse_year_accepts_any_four_digit_value() -> None:
+    assert parse_year("0999") == 999
+    assert parse_year("2099") == 2099
 
 
-def test_complete_year_range_margin_and_bounds() -> None:
-    assert complete_year_range(2000, None, 1918, 2003, 5) == (1995, 2003)
-    assert complete_year_range(None, 2000, 1918, 2003, 5) == (1995, 2003)
-    assert complete_year_range(None, 1920, 1918, 2026, 5) == (1918, 1925)
-    assert complete_year_range(2024, None, 1918, 2026, 5) == (2019, 2026)
-    assert complete_year_range(None, None, 1918, 2026) == (None, None)
+def test_single_year_uses_symmetric_offset_without_catalog_clipping() -> None:
+    assert complete_year_range(1000, None, 5) == (995, 1005)
+    assert complete_year_range(None, 1000, 5) == (995, 1005)
+    assert complete_year_range(-20, None, 5) == (-25, -15)
+    assert complete_year_range(None, None, 5) == (None, None)
 
 
-def test_single_year_outside_catalog_keeps_a_non_inverted_profile_range() -> None:
-    assert complete_year_range(1900, None, 1918, 2026, 5) == (1895, 1905)
-    assert complete_year_range(None, 2040, 1918, 2026, 5) == (2035, 2045)
+def test_explicit_year_range_is_preserved() -> None:
+    assert complete_year_range(1000, 2000, 5) == (1000, 2000)
 
 
-def test_complete_year_range_rejects_inverse() -> None:
+def test_complete_year_range_rejects_inverse_or_negative_offset() -> None:
     with pytest.raises(ValueError):
-        complete_year_range(2001, 2000, 1900, 2026)
+        complete_year_range(2001, 2000, 5)
+    with pytest.raises(ValueError):
+        complete_year_range(2000, None, -1)

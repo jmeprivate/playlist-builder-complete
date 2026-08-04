@@ -175,6 +175,7 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         print("No se encontró ninguna canción legible en la colección.", file=sys.stderr)
         return 2
 
+    catalog = songs
     if args.from_playlist:
         included, playlist_report = match_playlist_songs(songs, root, args.from_playlist)
         logging.getLogger(__name__).info(
@@ -191,7 +192,11 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         if not songs:
             raise ValueError("--from-playlist no contiene ninguna canción válida de la discoteca")
     if args.exclude_playlist:
-        excluded_paths, playlist_report = match_playlist_songs(songs, root, args.exclude_playlist)
+        # Se empareja contra el catálogo completo para que el recuento de
+        # "no escaneadas" no incluya canciones ya descartadas por --from-playlist.
+        excluded_paths, playlist_report = match_playlist_songs(
+            catalog, root, args.exclude_playlist
+        )
         logging.getLogger(__name__).info(
             "Playlists de exclusión: %d coincidencias; %d entradas ignoradas "
             "(inexistentes=%d, fuera=%d, no escaneadas=%d, no admitidas=%d)",
@@ -203,6 +208,10 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
             playlist_report.unsupported,
         )
         songs = [song for song in songs if song.path not in excluded_paths]
+        if not songs:
+            raise ValueError(
+                "--exclude-playlist excluyó todas las canciones candidatas de la discoteca"
+            )
 
     # Import after load_config(): ui.py and filters.py receive the selected
     # compatibility defaults when they import values from config.py.

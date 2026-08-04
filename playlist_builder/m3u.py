@@ -35,12 +35,24 @@ def read_m3u(path: Path) -> list[str]:
     if path.suffix.casefold() not in {".m3u", ".m3u8"}:
         raise ValueError(f"El formato de playlist no es M3U/M3U8: {path}")
     # utf-8-sig acepta tanto UTF-8 normal como el BOM habitual de M3U8.
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"No se pudo leer la playlist como UTF-8 (¿codificación heredada?): {path}"
+        ) from exc
+    except OSError as exc:
+        raise ValueError(f"No se pudo abrir la playlist: {path} ({exc.strerror or exc})") from exc
+    lines = text.splitlines()
     return [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
 
 
 def _canonical_key(path: Path) -> str:
     return unicodedata.normalize("NFC", str(path.resolve(strict=False)))
+
+
+def _casefold_key(path: Path) -> str:
+    return _canonical_key(path).casefold()
 
 
 def match_playlist_songs(
@@ -50,6 +62,9 @@ def match_playlist_songs(
 
     root = music_root.expanduser().resolve()
     catalog = {_canonical_key(song.path): song.path for song in songs}
+    # Índice auxiliar insensible a mayúsculas para sistemas de archivos que
+    # preservan la escritura pero no distinguen mayúsculas (p. ej. macOS).
+    catalog_ci = {_casefold_key(song.path): song.path for song in songs}
     matched: set[Path] = set()
     entries = matched_entries = missing = outside = not_scanned = unsupported = 0
     for playlist in playlists:
@@ -69,6 +84,8 @@ def match_playlist_songs(
                 outside += 1
                 continue
             song_path = catalog.get(_canonical_key(resolved))
+            if song_path is None:
+                song_path = catalog_ci.get(_casefold_key(resolved))
             if song_path is not None and song_path.is_file():
                 matched.add(song_path)
                 matched_entries += 1

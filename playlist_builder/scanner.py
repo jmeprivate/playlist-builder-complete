@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 from mutagen import MutagenError
 
 from .cache import CacheEntry, load_cache, write_cache
-from .config import AUDIO_EXTENSIONS, CACHE_FILENAME
+from .config import Settings, load_config
 from .metadata import read_song
 from .models import AuditIssue, AuditReport, Song
 from .progress import ProgressCallback, ScanProgress
@@ -36,17 +37,23 @@ def scan_library(
     *,
     rescan: bool = False,
     excluded_root: Path | None = None,
-    metadata_reader: MetadataReader = read_song,
+    metadata_reader: MetadataReader | None = None,
+    settings: Settings | None = None,
     progress: ProgressCallback | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> tuple[list[Song], AuditReport]:
     started_at = clock()
+    settings = settings or load_config()
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"La raíz musical no existe o no es un directorio: {root}")
     excluded = excluded_root.expanduser().resolve() if excluded_root is not None else None
-    cache_path = root / CACHE_FILENAME
-    old_cache = {} if rescan else load_cache(cache_path, root)
+    cache_path = root / settings.cache_filename
+    metadata_signature = (
+        f"year={datetime.now().year};min={settings.min_reasonable_year};"
+        f"offset={settings.max_reasonable_year_offset}"
+    )
+    old_cache = {} if rescan else load_cache(cache_path, root, metadata_signature)
     new_cache: dict[str, CacheEntry] = {}
     songs: list[Song] = []
     report = AuditReport()
@@ -58,7 +65,7 @@ def scan_library(
             path
             for path in root.rglob("*")
             if path.is_file()
-            and path.suffix.casefold() in AUDIO_EXTENSIONS
+            and path.suffix.casefold() in settings.audio_extensions
             and not _is_inside(path.resolve(), excluded)
             and not _is_stale_copy_stage(path.relative_to(root))
         ),
@@ -82,8 +89,19 @@ def scan_library(
             report.issues.append(AuditIssue(relative, error=str(exc)))
             error_count += 1
             if progress is not None:
-                progress(ScanProgress("file_processed", processed_count, len(paths), len(songs), cached_count, error_count, clock() - started_at))
+                progress(
+                    ScanProgress(
+                        "file_processed",
+                        processed_count,
+                        len(paths),
+                        len(songs),
+                        cached_count,
+                        error_count,
+                        clock() - started_at,
+                    )
+                )
             continue
+
         cached = old_cache.get(key)
         if cached and cached.size == stat.st_size and cached.mtime_ns == stat.st_mtime_ns:
             song, error = cached.song, cached.error
@@ -91,13 +109,22 @@ def scan_library(
             LOGGER.debug("Caché válida: %s", relative)
         else:
             try:
-                song = metadata_reader(path, root)
+                if metadata_reader is None:
+                    song = read_song(
+                        path,
+                        root,
+                        min_reasonable_year=settings.min_reasonable_year,
+                        max_reasonable_year_offset=settings.max_reasonable_year_offset,
+                    )
+                else:
+                    song = metadata_reader(path, root)
                 error = None
                 LOGGER.debug("Metadatos leídos: %s", relative)
             except (OSError, ValueError, TypeError, UnicodeError, MutagenError) as exc:
                 song = None
                 error = f"{type(exc).__name__}: {exc}"
                 LOGGER.warning("No se pudieron leer metadatos de %s: %s", relative, exc)
+
         new_cache[key] = CacheEntry(stat.st_size, stat.st_mtime_ns, song, error)
         if song is None:
             report.issues.append(AuditIssue(relative, error=error or "error desconocido"))
@@ -118,10 +145,31 @@ def scan_library(
                 report.issues.append(
                     AuditIssue(relative, missing_tags=missing, informational_tags=informational)
                 )
-        if progress is not None:
-            progress(ScanProgress("file_processed", processed_count, len(paths), len(songs), cached_count, error_count, clock() - started_at))
 
-    write_cache(cache_path, new_cache)
+        if progress is not None:
+            progress(
+                ScanProgress(
+                    "file_processed",
+                    processed_count,
+                    len(paths),
+                    len(songs),
+                    cached_count,
+                    error_count,
+                    clock() - started_at,
+                )
+            )
+
+    write_cache(cache_path, new_cache, metadata_signature)
     if progress is not None:
-        progress(ScanProgress("complete", len(paths), len(paths), len(songs), cached_count, error_count, clock() - started_at))
+        progress(
+            ScanProgress(
+                "complete",
+                len(paths),
+                len(paths),
+                len(songs),
+                cached_count,
+                error_count,
+                clock() - started_at,
+            )
+        )
     return songs, report

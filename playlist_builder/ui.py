@@ -236,7 +236,7 @@ def select_values(label: str, options: list[str], state: SelectionState) -> str:
         )
         if result in {"", BACK}:
             return result
-        state.add(result[0], result[1:])
+        state.add(result[0], result[1:])  # type: ignore[arg-type]
 
 
 def _simple_prompt(message: str, default: str = "") -> str:
@@ -323,7 +323,11 @@ def _format_mb(size: int) -> str:
 def format_song(song: Song) -> str:
     artist = ", ".join(song.artist) or "Artista desconocido"
     title = song.title or song.path.stem
-    details = [value for value in (song.album, str(song.year) if song.year else "") if value]
+    details = [
+        value
+        for value in (song.album, str(song.year) if song.year is not None else "")
+        if value
+    ]
     suffix = f" — {' · '.join(details)}" if details else ""
     return f"{artist} - {title}{suffix}"
 
@@ -480,8 +484,8 @@ def run_interactive(
             screen = 1 if result == BACK else 3
         elif screen == 3:
             result = _simple_prompt(
-                f"Desde el año (disponible desde {available_min or '—'}): ",
-                str(state.year_min_input or ""),
+                f"Desde el año (disponible desde {available_min if available_min is not None else '—'}): ",
+                str(state.year_min_input) if state.year_min_input is not None else "",
             )
             if result == BACK:
                 screen = 2
@@ -493,8 +497,8 @@ def run_interactive(
                 print("Valor no válido: el año debe ser un número entero")
         elif screen == 4:
             result = _simple_prompt(
-                f"Hasta el año (disponible hasta {available_max or '—'}): ",
-                str(state.year_max_input or ""),
+                f"Hasta el año (disponible hasta {available_max if available_max is not None else '—'}): ",
+                str(state.year_max_input) if state.year_max_input is not None else "",
             )
             if result == BACK:
                 screen = 3

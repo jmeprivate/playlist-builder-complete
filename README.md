@@ -18,8 +18,17 @@ Python 3.12 o posterior en macOS, Windows 11 y Linux.
   Various Artists únicamente en «Artistas de álbum». Ambos filtros se pueden combinar.
 - Los valores múltiples de `Genre` separados por comas, punto y coma o valores nativos independientes
   se convierten en géneros separados; por ejemplo, `Jazz, Contemporary Jazz` permite buscar cualquiera.
-- La caché `.playlist_catalog.json` se guarda en la raíz musical, usa rutas relativas y compara
-  ruta, tamaño y `mtime_ns`. Su reemplazo es atómico y una caché corrupta se ignora.
+- La caché versionada `.playlist_catalog.json` se guarda en la raíz musical, nunca guarda rutas
+  absolutas y compara cada archivo por ruta, tamaño y `mtime_ns`. Una versión incompatible, JSON
+  truncado o estructura insegura se invalida por completo: la caché nunca impide escanear.
+- Cada escritura se hace mediante un temporal, `fsync` y reemplazo atómico cuando el sistema lo
+  permite. Se registra inicio, fin, lectura, estado completo y errores por ruta. Una interrupción
+  queda marcada como incompleta y conserva las entradas anteriores; solo un recorrido completo poda
+  archivos desaparecidos. Si no hay permisos de escritura, el catálogo en memoria sigue disponible
+  y `--verbose` explica el fallo.
+- No se usa el `mtime` de directorios como fuente de verdad ni se añade una base de datos: ambos
+  complicarían el diseño sin conservar la garantía por archivo en discos externos y sistemas de
+  archivos diversos.
 - Los M3U usan UTF-8, separadores `/` y saltos de línea LF. Es una combinación entendida por los
   reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos.
 
@@ -66,6 +75,15 @@ El margen usado cuando solo se indica uno de los años también se configura all
 
 ```python
 DEFAULT_YEAR_MARGIN = 5
+```
+
+Opcionalmente, un `config.ini` en la raíz de la discoteca controla cuándo reintentar archivos cuyos
+metadatos fallaron. El valor predeterminado es siete días; un cambio de tamaño/fecha o `--rescan`
+siempre fuerza el reintento, independientemente de este plazo:
+
+```ini
+[cache]
+retry_error_after_days = 7
 ```
 
 ## Ejecución

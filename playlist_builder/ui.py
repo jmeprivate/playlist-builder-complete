@@ -27,6 +27,7 @@ from .normalization import deduplicate_display_values, normalize_for_search
 from .selector import select_balanced
 
 BACK = "__BACK__"
+NoticeLevel = Literal["info", "warning", "error"]
 
 
 @dataclass(slots=True)
@@ -60,6 +61,11 @@ class SelectionState:
         if value in target:
             target.remove(value)
         self.notice = f"Eliminado: {value}"
+
+    def take_notice(self) -> str:
+        notice = self.notice
+        self.notice = ""
+        return notice
 
 
 @dataclass(slots=True)
@@ -107,6 +113,12 @@ class FirstMatchSuggestion(AutoSuggest):
         if normalize_for_search(first).startswith(normalize_for_search(query)):
             return Suggestion(first[len(query) :])
         return None
+
+
+def _show_notice(message: str, level: NoticeLevel = "warning") -> None:
+    style = {"info": "ansicyan", "warning": "ansiyellow", "error": "ansired"}[level]
+    print_formatted_text(HTML(f"<{style}>{escape_html(message)}</{style}>"))
+    print()
 
 
 def _selection_toolbar(state: SelectionState, completer: SubstringCompleter) -> HTML:
@@ -188,6 +200,11 @@ def _selection_bindings(state: SelectionState, completer: SubstringCompleter) ->
             state.undo()
             get_app().invalidate()
 
+    @bindings.add("<any>")
+    def insert_text(event: KeyPressEvent) -> None:
+        state.notice = ""
+        event.current_buffer.insert_text(event.data)
+
     return bindings
 
 
@@ -212,6 +229,9 @@ def select_values(label: str, options: list[str], state: SelectionState) -> str:
     while True:
         clear()
         _show_selections(label, state)
+        previous_notice = state.take_notice()
+        if previous_notice:
+            _show_notice(previous_notice)
         session: PromptSession[str] = PromptSession(
             completer=completer,
             complete_while_typing=True,
@@ -222,7 +242,6 @@ def select_values(label: str, options: list[str], state: SelectionState) -> str:
             "+/- búsqueda: ",
             bottom_toolbar=lambda: _selection_toolbar(state, completer),
         )
-        state.notice = ""
         if result in {"", BACK}:
             return result
         state.add(result[0], result[1:])  # type: ignore[arg-type]
@@ -244,6 +263,10 @@ def _simple_prompt(message: str, default: str = "") -> str:
         default=default,
         bottom_toolbar="Esc borra la entrada; Esc de nuevo vuelve a la pantalla anterior",
     )
+
+
+def _normalize_choice(raw: str) -> str:
+    return BACK if raw == BACK else raw.strip().casefold()
 
 
 def sanitize_playlist_name(value: str, platform: str | None = None) -> str:
@@ -347,6 +370,7 @@ def run_interactive(
 
     state = UIState()
     screen = 0
+    pending_notice: tuple[str, NoticeLevel] | None = None
     while True:
         if screen == 0:
             result = select_values("Artistas", artists, state.artists)
@@ -363,6 +387,9 @@ def run_interactive(
             _show_header(
                 "Intervalo temporal", "Deja el campo vacío para no fijar este extremo"
             )
+            if pending_notice is not None:
+                _show_notice(*pending_notice)
+                pending_notice = None
             result = _simple_prompt(
                 f"Desde el año (mín. {available_min or '—'}): ",
                 str(state.year_min_input or ""),
@@ -377,12 +404,13 @@ def run_interactive(
                 )
                 screen = 3
             except ValueError as exc:
-                print_formatted_text(
-                    HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>")
-                )
+                pending_notice = (f"Valor no válido: {exc}", "error")
         elif screen == 3:
             clear()
             _show_header("Intervalo temporal", "El intervalo incluye ambos extremos")
+            if pending_notice is not None:
+                _show_notice(*pending_notice)
+                pending_notice = None
             result = _simple_prompt(
                 f"Hasta el año (máx. {available_max or '—'}): ",
                 str(state.year_max_input or ""),
@@ -403,12 +431,13 @@ def run_interactive(
                 )
                 screen = 4
             except ValueError as exc:
-                print_formatted_text(
-                    HTML(f"<ansired>Valor no válido: {escape_html(str(exc))}</ansired>")
-                )
+                pending_notice = (f"Valor no válido: {exc}", "error")
         elif screen == 4:
             clear()
             _show_header("Nombre de la playlist")
+            if pending_notice is not None:
+                _show_notice(*pending_notice)
+                pending_notice = None
             result = _simple_prompt("¿Qué nombre le damos a la playlist? ", state.playlist_name)
             if result == BACK:
                 screen = 3
@@ -417,18 +446,22 @@ def run_interactive(
                 requested = sanitize_playlist_name(result)
                 state.playlist_name = available_playlist_name(destination, requested)
                 if state.playlist_name != requested:
-                    print(f"Ya existía; se usará: {state.playlist_name}")
+                    pending_notice = (
+                        f"Ya existía; se usará: {state.playlist_name}",
+                        "warning",
+                    )
                 screen = 5
             except ValueError as exc:
-                print_formatted_text(
-                    HTML(f"<ansired>Nombre no válido: {escape_html(str(exc))}</ansired>")
-                )
+                pending_notice = (f"Nombre no válido: {exc}", "error")
         else:
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
             selected = select_balanced(candidates, max_size_bytes, max_per_album, seed)
             clear()
             _show_header("Resumen final", state.playlist_name)
+            if pending_notice is not None:
+                _show_notice(*pending_notice)
+                pending_notice = None
             print(f"Artistas incluidos: {', '.join(state.artists.included) or 'cualquiera'}")
             print(f"Artistas excluidos: {', '.join(state.artists.excluded) or 'ninguno'}")
             print(f"Géneros incluidos: {', '.join(state.genres.included) or 'cualquiera'}")
@@ -445,26 +478,28 @@ def run_interactive(
             print(f"\nCandidatas: {len(candidates)} ({candidate_size})")
             print(f"Seleccionadas: {len(selected)} ({selected_size})")
             if not selected:
-                choice = (
-                    _simple_prompt(
-                        "\nNo hay canciones seleccionables. [v]olver / [c]ancelar: "
+                while True:
+                    choice = _normalize_choice(
+                        _simple_prompt(
+                            "\nNo hay canciones seleccionables. [v]olver / [c]ancelar: "
+                        )
                     )
-                    .strip()
-                    .casefold()
-                )
-                if choice == "v" or choice == BACK:
-                    screen = 4
-                elif choice == "c":
-                    return None
+                    if choice in {"v", BACK}:
+                        screen = 4
+                        break
+                    if choice == "c":
+                        return None
+                    _show_notice("Elige v para volver o c para cancelar.", "error")
                 continue
-            choice = (
-                _simple_prompt("\n[s] confirmar / [v] volver / [c] cancelar: ")
-                .strip()
-                .casefold()
-            )
-            if choice == "s":
-                return state.playlist_name, selected
-            if choice == "v" or choice == BACK:
-                screen = 4
-            elif choice == "c":
-                return None
+            while True:
+                choice = _normalize_choice(
+                    _simple_prompt("\n[s] confirmar / [v] volver / [c] cancelar: ")
+                )
+                if choice == "s":
+                    return state.playlist_name, selected
+                if choice in {"v", BACK}:
+                    screen = 4
+                    break
+                if choice == "c":
+                    return None
+                _show_notice("Elige s para confirmar, v para volver o c para cancelar.", "error")

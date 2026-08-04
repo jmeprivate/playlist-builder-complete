@@ -4,7 +4,6 @@ import logging
 import os
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .cache import (
@@ -119,20 +118,6 @@ def _discover_audio_files(
     return paths, file_errors
 
 
-def _error_retry_due(entry: CacheEntry, now: datetime, days: float) -> bool:
-    if not entry.error:
-        return False
-    if not entry.error_at:
-        return True
-    try:
-        recorded = datetime.fromisoformat(entry.error_at)
-        if recorded.tzinfo is None:
-            recorded = recorded.replace(tzinfo=UTC)
-    except ValueError:
-        return True
-    return now - recorded >= timedelta(days=days)
-
-
 def scan_library(
     root: Path,
     *,
@@ -142,31 +127,19 @@ def scan_library(
     settings: Settings | None = None,
     progress: ProgressCallback | None = None,
     clock: Callable[[], float] = time.monotonic,
-    retry_error_after_days: float | None = None,
 ) -> tuple[list[Song], AuditReport]:
     started_at = clock()
     settings = settings or load_config()
-    retry_days = (
-        settings.retry_error_after_days
-        if retry_error_after_days is None
-        else retry_error_after_days
-    )
-    if retry_days < 0:
-        raise ValueError("retry_error_after_days no puede ser negativo")
 
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"La raíz musical no existe o no es un directorio: {root}")
     excluded = excluded_root.expanduser().resolve() if excluded_root is not None else None
     cache_path = root / settings.cache_filename
-    metadata_signature = (
-        f"year={datetime.now().year};min={settings.min_reasonable_year};"
-        f"offset={settings.max_reasonable_year_offset}"
-    )
+    metadata_signature = "year=unbounded-v1"
     loaded = CatalogCache() if rescan else load_catalog_cache(cache_path, root, metadata_signature)
     old_cache = loaded.files
     started = utc_now()
-    # Mark the catalog incomplete before discovery so an abrupt stop cannot legitimize old state.
     incomplete = CacheHealth(
         started,
         None,
@@ -195,7 +168,6 @@ def scan_library(
 
     cached_count = 0
     error_count = discovery_file_errors
-    now = datetime.now(UTC)
     for processed_count, path in enumerate(paths, start=discovery_file_errors + 1):
         try:
             relative = path.relative_to(root)
@@ -225,21 +197,17 @@ def scan_library(
             and cached.size == stat.st_size
             and cached.mtime_ns == stat.st_mtime_ns
         )
-        if cached is not None and unchanged and not _error_retry_due(cached, now, retry_days):
+        if cached is not None and cached.error is not None:
+            song, error, error_at = cached.song, cached.error, cached.error_at
+            cached_count += 1
+            LOGGER.debug("Error conservado en caché hasta --rescan: %s", relative)
+        elif cached is not None and unchanged:
             song, error, error_at = cached.song, cached.error, cached.error_at
             cached_count += 1
             LOGGER.debug("Caché válida: %s", relative)
         else:
             try:
-                if metadata_reader is None:
-                    song = read_song(
-                        path,
-                        root,
-                        min_reasonable_year=settings.min_reasonable_year,
-                        max_reasonable_year_offset=settings.max_reasonable_year_offset,
-                    )
-                else:
-                    song = metadata_reader(path, root)
+                song = read_song(path, root) if metadata_reader is None else metadata_reader(path, root)
                 error = error_at = None
                 LOGGER.debug("Metadatos leídos: %s", relative)
             except Exception as exc:

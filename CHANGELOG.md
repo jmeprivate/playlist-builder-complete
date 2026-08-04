@@ -12,14 +12,14 @@ Primera versión estable de Playlist Builder.
 
 - Generación interactiva de playlists M3U UTF-8 para colecciones musicales locales.
 - Filtros independientes por artista de pista, artista de álbum, género y año.
-- Intervalo simétrico `Y ± default_year_margin` cuando se introduce un único año.
+- Intervalo simétrico `Y ± max_reasonable_year_offset` cuando se introduce un único año.
 - Selección equilibrada por álbum, límite de tamaño, cuota opcional por artista y semillas reproducibles.
 - Perfiles de filtros reutilizables en JSON con escritura atómica y precedencia `CLI > perfil > INI`.
 - Inclusión y exclusión de candidatas mediante playlists M3U/M3U8 existentes.
 - Alias manuales de género configurables sin modificar las etiquetas originales.
 - Deduplicación opcional por contenido mediante SHA-256, limitada a colisiones de tamaño y cacheada durante la ejecución.
-- Vista previa completa o abreviada, rehacer selección y modo sorpresa.
-- Copia autocontenida en estructura plana numerada o conservando el árbol original.
+- Vista previa completa, posibilidad de rehacer la selección y modo sorpresa con nombres enmascarados.
+- Copia autocontenida en estructura plana numerada.
 - Marcador persistente para evitar reescanear exportaciones creadas por la aplicación.
 - Auditoría simple y completa de metadatos, archivos ilegibles y directorios inaccesibles.
 - Progreso de escaneo en terminal y configuración multiplataforma mediante `config.ini`.
@@ -27,7 +27,7 @@ Primera versión estable de Playlist Builder.
 ### Seguridad y fiabilidad
 
 - Caché versionada, validada mediante SHA-256 y firma de configuración.
-- Escaneo tolerante a errores por archivo y directorio, con reintentos configurables.
+- Escaneo tolerante a errores por archivo y directorio; los errores de metadatos solo se reintentan con `--rescan`.
 - Escrituras atómicas y rollback de copias ante errores o interrupciones.
 - Validación estricta de configuración, perfiles, nombres, rutas y tamaños.
 - Ninguna operación de deduplicación modifica, elimina, enlaza o renombra los archivos originales.

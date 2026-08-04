@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from . import config
 from .config import EMPTY_GENRE_ALIASES, GenreAliases
+from .deduplication import maybe_deduplicate_songs
 from .models import FilterSpec, Song
 from .normalization import normalize_for_search
 
@@ -80,7 +81,7 @@ def filter_songs(
 ) -> list[Song]:
     included_genres = {genre_aliases.resolve(value) for value in spec.included_genres}
     excluded_genres = {genre_aliases.resolve(value) for value in spec.excluded_genres}
-    return [
+    matched = [
         song
         for song in songs
         if song_matches(
@@ -91,3 +92,6 @@ def filter_songs(
             excluded_genres=excluded_genres,
         )
     ]
+    # Deduplication is configured per CLI run and cached by the immutable filter
+    # specification, so revisiting preview screens never re-hashes unchanged files.
+    return maybe_deduplicate_songs(matched, spec)

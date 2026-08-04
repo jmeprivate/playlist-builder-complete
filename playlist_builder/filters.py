@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .config import DEFAULT_YEAR_MARGIN
+from . import config
 from .models import FilterSpec, Song
 from .normalization import normalize_for_search
 
@@ -10,8 +10,13 @@ def complete_year_range(
     year_max: int | None,
     available_min: int | None,
     available_max: int | None,
-    margin: int = DEFAULT_YEAR_MARGIN,
+    margin: int | None = None,
 ) -> tuple[int | None, int | None]:
+    # Resolve the margin lazily so the value configured in config.ini (published
+    # to config.DEFAULT_YEAR_MARGIN by load_config) is honoured, instead of the
+    # import-time default frozen into this signature.
+    if margin is None:
+        margin = config.DEFAULT_YEAR_MARGIN
     if year_min is not None and year_max is not None:
         if year_min > year_max:
             raise ValueError("el año mínimo no puede ser mayor que el máximo")

@@ -71,9 +71,9 @@ def test_cache_valid_stale_removed_and_corrupt(
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 1
     cache_path = root / CACHE_FILENAME
-    cache = json.loads(cache_path.read_text(encoding="utf-8"))
-    cache["files"]["Artist/Album/one.mp3"]["size"] += 1
-    cache_path.write_text(json.dumps(cache), encoding="utf-8")
+    cached_data = json.loads(cache_path.read_text(encoding="utf-8"))
+    cached_data["files"]["Artist/Album/one.mp3"]["size"] += 1
+    cache_path.write_text(json.dumps(cached_data), encoding="utf-8")
     scan_library(root, metadata_reader=reader)
     assert len(calls) == 2
     audio.write_bytes(b"changed-size")
@@ -202,13 +202,13 @@ def test_interrupted_scan_is_incomplete_and_does_not_prune(tmp_path: Path) -> No
 
     with pytest.raises(KeyboardInterrupt):
         scan_library(root, metadata_reader=interrupt)
-    cache = load_catalog_cache(root / CACHE_FILENAME, root)
-    assert not cache.health.completed
-    assert cache.health.scan_started_at
-    assert cache.health.scan_finished_at is None
+    catalog = load_catalog_cache(root / CACHE_FILENAME, root)
+    assert not catalog.health.completed
+    assert catalog.health.scan_started_at
+    assert catalog.health.scan_finished_at is None
 
 
-def test_cached_error_retries_by_age_rescan_and_change(tmp_path: Path) -> None:
+def test_cached_error_retries_only_with_rescan(tmp_path: Path) -> None:
     root = tmp_path / "library"
     audio = root / "one.mp3"
     root.mkdir()
@@ -220,14 +220,13 @@ def test_cached_error_retries_by_age_rescan_and_change(tmp_path: Path) -> None:
         calls += 1
         raise ValueError("bad")
 
-    scan_library(root, metadata_reader=broken, retry_error_after_days=10)
-    scan_library(root, metadata_reader=broken, retry_error_after_days=10)
-    assert calls == 1
-    scan_library(root, metadata_reader=broken, retry_error_after_days=0)
-    scan_library(root, metadata_reader=broken, rescan=True, retry_error_after_days=10)
+    scan_library(root, metadata_reader=broken)
+    scan_library(root, metadata_reader=broken)
     audio.write_bytes(b"changed")
-    scan_library(root, metadata_reader=broken, retry_error_after_days=10)
-    assert calls == 4
+    scan_library(root, metadata_reader=broken)
+    assert calls == 1
+    scan_library(root, metadata_reader=broken, rescan=True)
+    assert calls == 2
 
 
 def test_residual_temporary_and_write_failure_do_not_lose_memory_catalog(

@@ -87,16 +87,6 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
     )
     parser.add_argument("--copy", type=Path, metavar="RUTA", help="copia la selección al destino")
     parser.add_argument(
-        "--copy-structure",
-        choices=("flat", "tree"),
-        default=settings.copy_structure if settings else "flat",
-        help=(
-            "estructura de las copias: flat usa nombres numerados en Music/ y tree "
-            "conserva las carpetas originales (configuración: "
-            f"{settings.copy_structure if settings else 'flat'})"
-        ),
-    )
-    parser.add_argument(
         "--audit", choices=("simple", "full"), help="muestra auditoría del catálogo"
     )
     parser.add_argument(
@@ -289,7 +279,6 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
             playlist_name,
             selected,
             surprise=surprise,
-            copy_structure=args.copy_structure,
         ).playlist_path
     else:
         final_path = root / playlist_name
@@ -326,11 +315,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.force and not args.save_profile:
             raise ValueError("--force solo puede usarse junto con --save-profile")
-        copy_structure_given = any(
-            item == "--copy-structure" or item.startswith("--copy-structure=") for item in raw_args
-        )
-        if copy_structure_given and not args.copy:
-            raise ValueError("--copy-structure solo puede usarse junto con --copy")
         if args.profile:
             validate_name(args.profile)
         if args.save_profile:

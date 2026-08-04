@@ -71,6 +71,7 @@ music_root = /Users/usuario/Música/MiDiscoteca
 profiles_file = filter_profiles.json
 retry_error_after_days = 7
 default_max_artist = 0
+deduplicate = false
 ```
 
 ## Ejecución
@@ -82,6 +83,7 @@ python crear_playlist.py
 python crear_playlist.py --size 4000
 python crear_playlist.py --size 4000 --max-album 1
 python crear_playlist.py --max-artist 3
+python crear_playlist.py --deduplicate --seed 12345
 python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
@@ -116,6 +118,12 @@ opcional con `chmod +x crear-playlist.sh`.
   `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
+- `--deduplicate`: tras aplicar playlists y filtros normales, agrupa las candidatas por tamaño y
+  calcula SHA-256, por bloques, únicamente en grupos de al menos dos. Por cada contenido idéntico
+  conserva la ruta relativa menor en orden estable (sin depender del recorrido del sistema). Está
+  desactivado por defecto (`deduplicate = false`); `--no-deduplicate` prevalece sobre el INI. Un
+  archivo que no pueda leerse se registra y se conserva como candidato, pues no se puede afirmar
+  que sea duplicado. `--verbose` detalla candidatas, hashes, grupos y fallos.
 - `--from-playlist RUTA`: limita las candidatas a la unión de una o varias playlists M3U/M3U8;
   puede repetirse. A continuación se aplican las exclusiones y los filtros interactivos habituales.
 - `--exclude-playlist RUTA`: elimina candidatas citadas por una playlist M3U/M3U8; puede repetirse.
@@ -210,6 +218,12 @@ Las colisiones reciben el sufijo incremental habitual. El M3U mantiene `#EXTINF`
 **abrir el archivo M3U sí revela títulos y artistas**.
 
 ## Selección equilibrada
+
+La deduplicación opcional ocurre justo antes de esta selección y no modifica, borra, enlaza ni copia
+los originales. Su coste es `O(n + n log n + B)`: `n` son las candidatas filtradas y `B` los bytes
+leídos exclusivamente de los grupos que colisionan en tamaño; con la opción desactivada el coste y
+las lecturas de contenido son cero. Los hashes no se persisten, evitando ampliar el esquema de la
+caché de metadatos; por ello nunca se reutiliza un hash obsoleto.
 
 Las candidatas se agrupan por carpeta de álbum. Las canciones y álbumes se barajan y la selección
 avanza por rondas, como máximo una canción por álbum y ronda. Se respeta `--max-album`; si una pista

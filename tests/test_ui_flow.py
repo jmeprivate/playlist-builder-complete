@@ -42,6 +42,31 @@ def test_preview_selection_is_the_selection_returned_for_writing(
     assert rendered == [result[1]]
 
 
+def test_disabled_deduplication_never_hashes(
+    tmp_path: Path,
+    song_factory: Callable[..., Song],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    songs = [song_factory(size_bytes=4), song_factory(size_bytes=4)]
+    monkeypatch.setattr(
+        ui,
+        "deduplicate_songs",
+        lambda candidates: pytest.fail("se intentó deduplicar sin activar la opción"),
+    )
+    _drive_prompts(monkeypatch, ["", "", "a", "Lista", "s"])
+
+    result = ui.run_interactive(
+        songs,
+        max_size_bytes=1_000,
+        max_per_album=2,
+        destination=tmp_path,
+        seed=7,
+        deduplicate=False,
+    )
+
+    assert result is not None
+
+
 def test_surprise_never_calls_preview_formatter(
     tmp_path: Path,
     song_factory: Callable[..., Song],

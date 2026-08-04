@@ -91,6 +91,20 @@ def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
         "--audit-only", action="store_true", help="audita y termina sin abrir la interfaz"
     )
     parser.add_argument("--seed", type=int, help="semilla para una selección reproducible")
+    deduplicate = parser.add_mutually_exclusive_group()
+    deduplicate.add_argument(
+        "--deduplicate",
+        dest="deduplicate",
+        action="store_true",
+        help="elimina duplicados por contenido de las candidatas filtradas",
+    )
+    deduplicate.add_argument(
+        "--no-deduplicate",
+        dest="deduplicate",
+        action="store_false",
+        help="desactiva la deduplicación configurada",
+    )
+    parser.set_defaults(deduplicate=settings.deduplicate if settings else False)
     parser.add_argument(
         "--from-playlist",
         type=Path,
@@ -240,6 +254,7 @@ def _run(args: argparse.Namespace, settings: Settings) -> int:
         preview_entries=settings.preview_entries,
         initial_profile=getattr(args, "loaded_profile", None),
         on_confirm=save_confirmed if args.save_profile else None,
+        deduplicate=args.deduplicate,
     )
     if result is None:
         print("Operación cancelada; no se creó ningún archivo.")

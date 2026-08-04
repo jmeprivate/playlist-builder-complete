@@ -22,6 +22,7 @@ from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.shortcuts import clear, confirm, print_formatted_text
 
 from .config import MAX_REASONABLE_YEAR_OFFSET, MIN_REASONABLE_YEAR
+from .deduplication import deduplicate_songs
 from .filters import complete_year_range, filter_songs
 from .models import FilterSpec, Song
 from .normalization import deduplicate_display_values, normalize_for_search
@@ -406,6 +407,7 @@ def run_interactive(
     preview_entries: int = 5,
     initial_profile: FilterProfile | None = None,
     on_confirm: Callable[[FilterProfile], None] | None = None,
+    deduplicate: bool = False,
 ) -> tuple[str, list[Song]] | None:
     artists = sorted(
         deduplicate_display_values(value for song in songs for value in song.artist),
@@ -565,6 +567,8 @@ def run_interactive(
         elif screen == 5:
             spec = _to_filter_spec(state)
             candidates = filter_songs(songs, spec)
+            if deduplicate:
+                candidates = deduplicate_songs(candidates)
             if not state.selected:
                 selection = select_balanced_with_stats(
                     candidates,

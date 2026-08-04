@@ -20,6 +20,7 @@ DEFAULT_MAX_ALBUM = 2
 DEFAULT_RETRY_ERROR_AFTER_DAYS = 7.0
 # 0 conserva el comportamiento histórico: sin cuota por artista de pista.
 DEFAULT_MAX_ARTIST = 0
+DEFAULT_DEDUPLICATE = False
 CACHE_FILENAME = ".playlist_catalog.json"
 CONFIG_FILENAME = "config.ini"
 PROFILES_FILENAME = "filter_profiles.json"
@@ -40,6 +41,7 @@ class Settings:
     default_max_album: int
     retry_error_after_days: float
     default_max_artist: int
+    deduplicate: bool
     cache_filename: str
     min_reasonable_year: int
     max_reasonable_year_offset: int
@@ -145,6 +147,7 @@ def load_config(path: Path | str | None = None) -> Settings:
         "default_max_album",
         "retry_error_after_days",
         "default_max_artist",
+        "deduplicate",
         "cache_filename",
         "min_reasonable_year",
         "max_reasonable_year_offset",
@@ -157,7 +160,8 @@ def load_config(path: Path | str | None = None) -> Settings:
     # profiles_file was added after the original INI format.  Keeping a safe
     # default beside the selected INI lets existing user configurations update
     # without becoming unusable.
-    missing = expected - {"profiles_file"} - set(section)
+    # Optional additions retain compatibility with existing user INIs.
+    missing = expected - {"profiles_file", "deduplicate"} - set(section)
     if missing:
         key = sorted(missing)[0]
         raise _problem(source, key, "falta la clave obligatoria")
@@ -246,6 +250,10 @@ def load_config(path: Path | str | None = None) -> Settings:
         raise _problem(source, "surprise_mode", "debe ser true o false") from exc
     if surprise_mode is None:
         raise _problem(source, "surprise_mode", "falta la clave obligatoria")
+    try:
+        deduplicate = section.getboolean("deduplicate", fallback=DEFAULT_DEDUPLICATE)
+    except ValueError as exc:
+        raise _problem(source, "deduplicate", "debe ser true o false") from exc
     copy_structure = section["copy_structure"].strip().casefold()
     if copy_structure not in {"flat", "tree"}:
         raise _problem(source, "copy_structure", "debe ser 'flat' o 'tree'")
@@ -264,6 +272,7 @@ def load_config(path: Path | str | None = None) -> Settings:
         default_max_album=positive_int("default_max_album"),
         retry_error_after_days=nonnegative_float("retry_error_after_days"),
         default_max_artist=nonnegative_int("default_max_artist"),
+        deduplicate=deduplicate,
         cache_filename=cache,
         min_reasonable_year=minimum,
         max_reasonable_year_offset=offset,

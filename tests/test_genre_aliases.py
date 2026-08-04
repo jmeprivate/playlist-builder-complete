@@ -13,16 +13,12 @@ def write_config(path: Path) -> Path:
     path.write_text(
         """[playlist_builder]
 music_root = music
-default_year_margin = 5
 default_size_mb = 8000
 default_max_album = 2
-retry_error_after_days = 7
 default_max_artist = 0
 cache_filename = .cache.json
-min_reasonable_year = 1000
-max_reasonable_year_offset = 1
+max_reasonable_year_offset = 5
 surprise_mode = false
-preview_entries = 5
 """,
         encoding="utf-8",
     )

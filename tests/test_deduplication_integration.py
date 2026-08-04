@@ -33,8 +33,13 @@ copy_structure = flat
 
 
 def test_old_config_defaults_deduplication_off(tmp_path: Path) -> None:
-    assert load_config(_write_config(tmp_path / "old.ini")).deduplicate is False
-    assert load_config(_write_config(tmp_path / "on.ini", deduplicate="true")).deduplicate is True
+    old_settings = load_config(_write_config(tmp_path / "old.ini"))
+    enabled_settings = load_config(
+        _write_config(tmp_path / "on.ini", deduplicate="true")
+    )
+
+    assert old_settings.deduplicate is False
+    assert enabled_settings.deduplicate is True
 
 
 def test_filtered_deduplication_is_cached_per_spec(song_factory, monkeypatch) -> None:
@@ -46,7 +51,7 @@ def test_filtered_deduplication_is_cached_per_spec(song_factory, monkeypatch) ->
 
     calls = 0
 
-    def counted_hash(path: Path) -> str:
+    def counted_hash(_path: Path) -> str:
         nonlocal calls
         calls += 1
         return "same"
@@ -60,4 +65,7 @@ def test_filtered_deduplication_is_cached_per_spec(song_factory, monkeypatch) ->
         configure_deduplication(False)
 
     assert calls == 2
-    assert filter_songs([duplicate, representative], spec) == [duplicate, representative]
+    assert filter_songs([duplicate, representative], spec) == [
+        duplicate,
+        representative,
+    ]

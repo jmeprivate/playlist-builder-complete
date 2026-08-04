@@ -4,9 +4,31 @@ from pathlib import Path
 
 from mutagen import MutagenError
 
+from playlist_builder.cache import CacheEntry, load_cache, write_cache
 from playlist_builder.config import CACHE_FILENAME
 from playlist_builder.models import Song
 from playlist_builder.scanner import scan_library
+
+
+def test_cache_round_trip_accepts_untouched_digest(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    relative = Path("Artist/Album/one.mp3")
+    song = Song(
+        path=root / relative,
+        relative_path=relative,
+        artist=("Artist",),
+        genres=("Rock",),
+        year=2000,
+        album="Album",
+        album_directory=relative.parent,
+        size_bytes=3,
+    )
+    cache_path = root / CACHE_FILENAME
+    write_cache(cache_path, {relative.as_posix(): CacheEntry(3, 123, song, None)})
+
+    loaded = load_cache(cache_path, root)
+
+    assert loaded[relative.as_posix()].song == song
 
 
 def test_cache_valid_stale_removed_corrupt_and_modified(

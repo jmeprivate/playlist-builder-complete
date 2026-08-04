@@ -207,7 +207,11 @@ def scan_library(
             LOGGER.debug("Caché válida: %s", relative)
         else:
             try:
-                song = read_song(path, root) if metadata_reader is None else metadata_reader(path, root)
+                song = (
+                    read_song(path, root)
+                    if metadata_reader is None
+                    else metadata_reader(path, root)
+                )
                 error = error_at = None
                 LOGGER.debug("Metadatos leídos: %s", relative)
             except Exception as exc:

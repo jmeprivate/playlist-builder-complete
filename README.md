@@ -19,8 +19,9 @@ Python 3.12 o posterior en macOS, Windows 11 y Linux.
 - Los valores múltiples de `Genre` separados por comas, punto y coma o valores nativos independientes
   se convierten en géneros separados; por ejemplo, `Jazz, Contemporary Jazz` permite buscar cualquiera.
 - La caché versionada `.playlist_catalog.json` se guarda en la raíz musical, nunca guarda rutas
-  absolutas y compara cada archivo por ruta, tamaño y `mtime_ns`. Una versión incompatible, JSON
-  truncado o estructura insegura se invalida por completo: la caché nunca impide escanear.
+  absolutas y compara cada archivo por ruta, tamaño y `mtime_ns`. Incluye la firma de configuración
+  y un digest SHA-256; una versión incompatible, JSON truncado, manipulado o con rutas inseguras se
+  invalida por completo: la caché nunca impide escanear.
 - Cada escritura se hace mediante un temporal, `fsync` y reemplazo atómico cuando el sistema lo
   permite. Se registra inicio, fin, lectura, estado completo y errores por ruta. Una interrupción
   queda marcada como incompleta y conserva las entradas anteriores; solo un recorrido completo poda
@@ -30,7 +31,8 @@ Python 3.12 o posterior en macOS, Windows 11 y Linux.
   complicarían el diseño sin conservar la garantía por archivo en discos externos y sistemas de
   archivos diversos.
 - Los M3U usan UTF-8, separadores `/` y saltos de línea LF. Es una combinación entendida por los
-  reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos.
+  reproductores actuales de los tres sistemas y mantiene portabilidad entre ellos. Los controles que
+  podrían inyectar líneas en `#EXTINF` se sustituyen sin eliminar marcas Unicode de formato legítimas.
 
 No existe una incompatibilidad técnica general con los formatos pedidos, aunque la disponibilidad
 real de etiquetas depende de que cada archivo las contenga y de que `mutagen` reconozca esa variante.
@@ -59,30 +61,13 @@ python -m pip install -e ".[dev]"
 
 ## Configurar la discoteca
 
-Abra `playlist_builder/config.py` y cambie únicamente esta constante por la ruta real:
-
-```python
-MUSIC_ROOT = Path(r"/Users/usuario/Música/MiDiscoteca")
-```
-
-En Windows, por ejemplo:
-
-```python
-MUSIC_ROOT = Path(r"D:\MiDiscoteca")
-```
-
-El margen usado cuando solo se indica uno de los años también se configura allí:
-
-```python
-DEFAULT_YEAR_MARGIN = 5
-```
-
-Opcionalmente, un `config.ini` en la raíz de la discoteca controla cuándo reintentar archivos cuyos
-metadatos fallaron. El valor predeterminado es siete días; un cambio de tamaño/fecha o `--rescan`
-siempre fuerza el reintento, independientemente de este plazo:
+Edite el `config.ini` del proyecto (o el indicado mediante `--config`). Además de la raíz musical y
+los valores predeterminados, `retry_error_after_days` controla cuándo se vuelven a leer los archivos
+cuyos metadatos fallaron. Un cambio de tamaño/fecha o `--rescan` siempre fuerza el reintento:
 
 ```ini
-[cache]
+[playlist_builder]
+music_root = /Users/usuario/Música/MiDiscoteca
 retry_error_after_days = 7
 ```
 
@@ -98,6 +83,7 @@ python crear_playlist.py --audit simple
 python crear_playlist.py --audit full --audit-only
 python crear_playlist.py --copy "D:\Musica para el coche"
 python crear_playlist.py --size 8000 --seed 12345
+python crear_playlist.py --surprise --copy "/media/USB"
 ```
 
 Después de instalar el proyecto en el entorno virtual, también puede usarse:
@@ -114,12 +100,18 @@ opcional con `chmod +x crear-playlist.sh`.
 - `--size N`: máximo en MB decimales (`1 MB = 1_000_000 bytes`); acepta decimales y vale 8000 por
   defecto. El resultado nunca supera el límite.
 - `--max-album N`: máximo de canciones por carpeta de álbum; vale 2 por defecto.
-- `--copy RUTA`: copia las canciones a `RUTA/Music/<ruta original>` y crea allí el M3U.
+- `--copy RUTA`: copia las canciones a `RUTA/Music/` y crea allí el M3U. Por defecto usa nombres
+  planos `índice - título (artista).ext`; `copy_structure = tree` conserva el árbol original.
 - `--audit simple|full`: muestra el resumen o también el detalle por archivo y continúa hacia la UI.
+  `full` se rechaza en modo sorpresa porque revela rutas; use `simple` o `--no-surprise`.
 - `--audit-only`: muestra la auditoría (simple si no se especificó otra) y termina.
 - `--seed N`: hace reproducible la selección si catálogo y filtros no cambian.
+- `--surprise` / `--no-surprise`: activa o desactiva explícitamente el modo sorpresa. La opción CLI
+  prevalece sobre `surprise_mode` de `config.ini`.
+- `--config RUTA`: usa expresamente ese archivo INI.
 - `--rescan`: descarta la caché y relee todos los metadatos.
-- `--verbose`: informa sobre caché, lectura y operaciones.
+- `--verbose`: informa sobre caché, lectura y operaciones. Puede revelar rutas y detalles; no se debe
+  usar cuando se necesita una sorpresa estricta.
 - `--debug`: añade detalles de depuración y deja visibles los tracebacks inesperados.
 
 ## Interfaz
@@ -146,9 +138,32 @@ un filtro temporal.
 Los años son opcionales e inclusivos. Si se rellena solo un extremo, el otro se calcula con
 `DEFAULT_YEAR_MARGIN` y se limita al rango disponible.
 
-Si el nombre del M3U ya existe, la aplicación propone automáticamente `Nombre (2).m3u`, sin
-sobrescribirlo. Antes de escribir muestra filtros, candidatas, tamaños y selección prevista, y deja
-confirmar, volver o cancelar.
+Después de fijar los filtros, la aplicación calcula una única selección y muestra su preview antes de
+pedir el nombre. La preview abreviada enseña las primeras y últimas cinco entradas (configurables), y
+ofrece `[a]ceptar`, `[r]ehacer`, `[v]er completa` y `[c]ancelar`. Rehacer conserva filtros y límites.
+Con `--seed`, la selección es reproducible y la interfaz no finge que puede rehacerla al azar: ofrece
+volver a filtros o cancelar. La selección aceptada es exactamente la confirmada y escrita.
+
+Las preferencias de preview y copia viven en el mismo `config.ini` que el resto de la configuración:
+
+```ini
+[playlist_builder]
+surprise_mode = false
+preview_entries = 5
+copy_structure = flat
+retry_error_after_days = 7
+```
+
+En un checkout se usa el `config.ini` de la raíz del proyecto. Tras instalar, la plantilla incluida
+en el paquete se copia una sola vez a la ubicación de configuración del usuario de Windows, macOS o
+Linux. `--config RUTA` permite seleccionar otro archivo de forma explícita.
+
+En modo sorpresa se omiten preview, composición y conteos de selección: se pide directamente el
+nombre y solo se presenta un resumen de filtros, límites, destino y el aviso de privacidad. No hay
+acción de rehacer. Con `--copy`, incluso si `copy_structure = tree`, la protección tiene prioridad y
+se usan rutas planas `Music/1 - Nombre playlist.ext`, conservando Unicode, espacios y la extensión.
+Las colisiones reciben el sufijo incremental habitual. El M3U mantiene `#EXTINF` por compatibilidad:
+**abrir el archivo M3U sí revela títulos y artistas**.
 
 ## Selección equilibrada
 
@@ -160,9 +175,9 @@ y no favorece sistemáticamente los primeros artistas.
 ## Copia segura
 
 Con `--copy`, primero se copian todas las pistas a una zona temporal mediante `shutil.copy2`. Solo
-después se publican en `Music/`, y el M3U se publica el último. Ante un fallo se retiran exclusivamente
-los archivos creados por esa operación; nunca se borran archivos preexistentes. Una copia idéntica
-se reutiliza y una colisión con contenido distinto recibe un sufijo incremental.
+después se publican en `Music/`, y el M3U se publica el último. Ante un fallo o `Ctrl+C` se retiran
+exclusivamente los archivos y directorios creados por esa operación; nunca se borran elementos
+preexistentes. Una copia idéntica se reutiliza y una colisión distinta recibe un sufijo incremental.
 
 Si el destino se encuentra dentro de la discoteca, se excluye por completo del escaneo de esa
 ejecución. Los archivos originales nunca se modifican.
@@ -170,8 +185,9 @@ ejecución. Los archivos originales nunca se modifican.
 ## Auditoría
 
 La auditoría se recopila durante el escaneo normal. `simple` cuenta archivos, tags ausentes y errores.
-`full` añade cada ruta, sus tags ausentes y el error concreto. Un archivo corrupto, borrado durante el
-escaneo o con metadatos no legibles no detiene el resto.
+`full` añade cada ruta, sus tags ausentes y el error concreto. Un archivo corrupto, un error inesperado
+del lector o un directorio inaccesible se registra sin detener el resto; los fallos de directorio no se
+contabilizan falsamente como canciones ilegibles.
 
 ## Pruebas y calidad
 
@@ -183,8 +199,9 @@ mypy playlist_builder
 ```
 
 Los tests usan directorios temporales y lectores simulados: no acceden a la colección real. Cubren
-normalización, años, filtros, tags ausentes, selección por rondas, límites, semillas, M3U, caché,
-auditoría, colisiones y fallos de copia. Incluyen además regresiones obtenidas de ejemplos MP3 y FLAC
+normalización, años, filtros, tags ausentes, selección por rondas, límites, semillas, M3U, integridad
+de caché, auditoría, colisiones, fallos de copia y rollback ante interrupciones. Incluyen además
+regresiones obtenidas de ejemplos MP3 y FLAC
 reales con `Artist`/`AlbumArtist`, géneros separados por comas y nombres Unicode descompuestos.
 
 ## Solución de problemas

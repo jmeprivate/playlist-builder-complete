@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -13,8 +15,8 @@ from typing import Any
 from .models import Song
 
 LOGGER = logging.getLogger(__name__)
-# El formato completo (entradas y metadatos de salud) se invalida como una unidad.
-CACHE_VERSION = 3
+# Version 5 combines integrity/configuration binding with scan-health metadata.
+CACHE_VERSION = 5
 
 
 def utc_now() -> str:
@@ -48,27 +50,62 @@ class CatalogCache:
 def _safe_relative(value: object) -> str:
     relative = str(value)
     parsed = PurePosixPath(relative)
-    if parsed.is_absolute() or not relative or ".." in parsed.parts:
+    if (
+        parsed.is_absolute()
+        or not relative
+        or "\\" in relative
+        or ".." in parsed.parts
+        or (parsed.parts and parsed.parts[0].endswith(":"))
+    ):
         raise ValueError(f"ruta no relativa en caché: {relative!r}")
     return relative
 
 
-def load_catalog_cache(path: Path, root: Path) -> CatalogCache:
+def _payload_digest(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def load_catalog_cache(
+    path: Path,
+    root: Path,
+    metadata_signature: str | None = None,
+) -> CatalogCache:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("estructura incompatible")
+        digest = raw.get("digest")
+        payload = {key: value for key, value in raw.items() if key != "digest"}
+        if not isinstance(digest, str) or not hmac.compare_digest(digest, _payload_digest(payload)):
+            raise ValueError("la caché fue modificada o está dañada")
         if (
-            not isinstance(raw, dict)
-            or raw.get("version") != CACHE_VERSION
-            or not isinstance(raw.get("files"), dict)
-            or not isinstance(raw.get("health"), dict)
+            payload.get("version") != CACHE_VERSION
+            or (
+                metadata_signature is not None
+                and payload.get("metadata_signature", "") != metadata_signature
+            )
+            or not isinstance(payload.get("files"), dict)
+            or not isinstance(payload.get("health"), dict)
         ):
-            raise ValueError("versión o estructura incompatible")
+            raise ValueError("versión, configuración o estructura incompatible")
+
         entries: dict[str, CacheEntry] = {}
-        for relative_value, value in raw["files"].items():
+        for relative_value, value in payload["files"].items():
             relative = _safe_relative(relative_value)
             if not isinstance(value, dict):
-                raise ValueError("entrada de archivo inválida")
+                raise ValueError("entrada de caché incompatible")
             song_data = value.get("song")
+            if song_data is not None:
+                if not isinstance(song_data, dict):
+                    raise ValueError("canción en caché incompatible")
+                _safe_relative(song_data.get("relative_path"))
+                _safe_relative(song_data.get("album_directory"))
             entries[relative] = CacheEntry(
                 size=int(value["size"]),
                 mtime_ns=int(value["mtime_ns"]),
@@ -76,7 +113,8 @@ def load_catalog_cache(path: Path, root: Path) -> CatalogCache:
                 error=str(value["error"]) if value.get("error") else None,
                 error_at=str(value["error_at"]) if value.get("error_at") else None,
             )
-        health_raw = raw["health"]
+
+        health_raw = payload["health"]
         errors_raw = health_raw.get("errors", {})
         if not isinstance(errors_raw, dict):
             raise ValueError("resumen de errores inválido")
@@ -96,14 +134,23 @@ def load_catalog_cache(path: Path, root: Path) -> CatalogCache:
         return CatalogCache()
 
 
-def load_cache(path: Path, root: Path) -> dict[str, CacheEntry]:
-    """API compatible: carga solo las entradas de una caché válida."""
-    return load_catalog_cache(path, root).files
+def load_cache(
+    path: Path,
+    root: Path,
+    metadata_signature: str | None = None,
+) -> dict[str, CacheEntry]:
+    """Compatibility API returning only entries from a valid catalog."""
+    return load_catalog_cache(path, root, metadata_signature).files
 
 
-def write_catalog_cache(path: Path, cache: CatalogCache) -> bool:
-    data: dict[str, Any] = {
+def write_catalog_cache(
+    path: Path,
+    cache: CatalogCache,
+    metadata_signature: str = "",
+) -> bool:
+    payload: dict[str, Any] = {
         "version": CACHE_VERSION,
+        "metadata_signature": metadata_signature,
         "health": {
             "scan_started_at": cache.health.scan_started_at,
             "scan_finished_at": cache.health.scan_finished_at,
@@ -122,6 +169,7 @@ def write_catalog_cache(path: Path, cache: CatalogCache) -> bool:
             for relative, entry in sorted(cache.files.items())
         },
     }
+    data = {**payload, "digest": _payload_digest(payload)}
     temporary: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,11 +177,10 @@ def write_catalog_cache(path: Path, cache: CatalogCache) -> bool:
             "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
         ) as handle:
             temporary = Path(handle.name)
-            json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
+            json.dump(data, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        # También hace durable el cambio de nombre en sistemas POSIX; en otros, se omite.
         try:
             directory_fd = os.open(path.parent, os.O_RDONLY)
             try:
@@ -143,19 +190,29 @@ def write_catalog_cache(path: Path, cache: CatalogCache) -> bool:
         except OSError:
             pass
         return True
-    except OSError as exc:
-        LOGGER.warning("No se pudo escribir la caché %s: %s", path, exc)
+    except KeyboardInterrupt:
         if temporary is not None:
             with suppress(OSError):
                 temporary.unlink(missing_ok=True)
+        raise
+    except OSError as exc:
+        if temporary is not None:
+            with suppress(OSError):
+                temporary.unlink(missing_ok=True)
+        LOGGER.warning("No se pudo escribir la caché %s: %s", path, exc)
         return False
 
 
-def write_cache(path: Path, entries: dict[str, CacheEntry]) -> bool:
-    """API compatible para consumidores que no aportan datos de salud."""
+def write_cache(
+    path: Path,
+    entries: dict[str, CacheEntry],
+    metadata_signature: str = "",
+) -> bool:
+    """Compatibility API for consumers that do not supply scan-health data."""
     now = utc_now()
     errors = {key: entry.error for key, entry in entries.items() if entry.error}
     return write_catalog_cache(
         path,
         CatalogCache(entries, CacheHealth(now, now, True, None, errors)),
+        metadata_signature,
     )

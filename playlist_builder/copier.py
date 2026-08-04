@@ -41,8 +41,12 @@ def _collision_free_target(
         index += 1
 
 
-def _safe_component(value: str) -> str:
-    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).rstrip(" .")
+def _safe_component(value: str, platform: str | None = None) -> str:
+    system = platform or os.name
+    illegal = r'[<>:"/\\|?*\x00-\x1f]' if system == "nt" else r"[/\x00]"
+    value = re.sub(illegal, "_", value)
+    if system == "nt":
+        value = value.rstrip(" .")
     return value or "Playlist"
 
 

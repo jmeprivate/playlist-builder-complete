@@ -37,11 +37,11 @@ class UserConfig:
 
 
 def default_config_path() -> Path:
-    """Prefer an explicit working-directory config, then the launcher-adjacent example."""
+    """Prefer a working-directory config, then the defaults shipped with the package."""
     local = Path("config.ini")
     if local.is_file():
         return local
-    return Path(__file__).resolve().parent.parent / "config.ini"
+    return Path(__file__).resolve().with_name("config.ini")
 
 
 def load_user_config(path: Path | None = None) -> UserConfig:

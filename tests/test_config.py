@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from playlist_builder.config import UserConfig, load_user_config
+from playlist_builder import config
+from playlist_builder.config import UserConfig, default_config_path, load_user_config
 
 
 def test_load_user_config_and_defaults(tmp_path: Path) -> None:
@@ -14,6 +15,16 @@ def test_load_user_config_and_defaults(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert load_user_config(configured) == UserConfig(True, 8, "tree")
+
+
+def test_default_config_path_uses_packaged_fallback_from_another_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    packaged = Path(config.__file__).resolve().with_name("config.ini")
+    assert default_config_path() == packaged
+    assert packaged.is_file()
+    assert load_user_config() == UserConfig()
 
 
 @pytest.mark.parametrize(

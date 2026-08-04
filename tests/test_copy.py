@@ -8,6 +8,14 @@ from playlist_builder.copier import CopyTransactionError, copy_and_write_playlis
 from playlist_builder.models import Song
 
 
+def test_safe_component_only_replaces_characters_illegal_on_target_platform() -> None:
+    value = "Tema: directo? * | \u00e7 🎵"
+    assert copier._safe_component(value, platform="posix") == value
+    assert copier._safe_component(value, platform="nt") == "Tema_ directo_ _ _ \u00e7 🎵"
+    assert copier._safe_component("Final. ", platform="posix") == "Final. "
+    assert copier._safe_component("Final. ", platform="nt") == "Final"
+
+
 def test_copy_preserves_tree_and_handles_collision(
     tmp_path: Path, song_factory: Callable[..., Song]
 ) -> None:
